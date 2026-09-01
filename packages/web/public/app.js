@@ -12,7 +12,7 @@
 import { api, idempotencyKey } from './lib/api.js';
 import { $, esc, n } from './lib/dom.js';
 import { dialog } from './lib/modal.js';
-import { toast } from './lib/toast.js';
+import { toast, toastSticky } from './lib/toast.js';
 import { initShell } from './lib/shell.js';
 import { ceilingFor } from './lib/ceilings.js';
 
@@ -184,14 +184,18 @@ function fieldsFor(line, action) {
       bagTagNumber: 'Bag tag number'
     };
     const isLocation = field === 'storageLocation';
+    const isBagTag = field === 'bagTagNumber';
     // Location is optional on a direct issue: the material never sat anywhere.
-    const optional = isLocation && action === 'DIRECT_ISSUE';
+    // A bag tag is optional because the server numbers the bag when it is left
+    // blank — typing one is for bagging into a tag that is already printed.
+    const optional = (isLocation && action === 'DIRECT_ISSUE') || isBagTag;
 
     return {
       name: field,
       label: labels[field] + (optional ? ' (optional)' : ''),
       value: isLocation ? (line.storageLocation ?? '') : '',
       required: !optional,
+      ...(isBagTag ? { hint: 'Leave blank and the next tag number is assigned.' } : {}),
       // A warehouse invents locations faster than anyone maintains a list, so
       // these are suggestions over free text, not a closed set.
       ...(isLocation && STORAGE_LOCATIONS.length
@@ -231,7 +235,15 @@ async function act(line, action) {
       if (index >= 0) state.results[index] = { ...state.results[index], ...result.line };
 
       renderResults();
-      toast(result.replayed ? 'Already recorded.' : `${ACTION_LABELS[action]} recorded.`);
+
+      // When the server numbered the bag, that number has to get onto the bag
+      // in marker pen — so it leads the message and stays up long enough to
+      // copy, rather than trailing a confirmation that fades in three seconds.
+      if (!result.replayed && !values.bagTagNumber && result.bagTagNumber) {
+        toastSticky(`Bagged. Write ${result.bagTagNumber} on the bag.`);
+      } else {
+        toast(result.replayed ? 'Already recorded.' : `${ACTION_LABELS[action]} recorded.`);
+      }
       return result;
     }
   });

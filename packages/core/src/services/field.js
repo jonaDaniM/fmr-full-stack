@@ -19,7 +19,7 @@ import {
   planReturnedResubmission, BACKORDER_STATUS
 } from '../domain/backorder.js';
 import { settleNotices, sweepStaleNotices } from './notices.js';
-import { assertFieldOpen } from './controls.js';
+import { assertFieldOpen, nextBagTagNumber } from './controls.js';
 
 /** Caps on the free-text fields a crew types, matching FMRv3. */
 export const TEXT_LIMITS = Object.freeze({
@@ -227,8 +227,11 @@ async function issueFromBag(client, line, state, req, user, correlationId) {
 
 /** Reserve material under a bag tag, creating the tag if this is its first line. */
 async function reserveIntoBag(client, line, req, user, correlationId) {
-  const tagNumber = String(req.bagTagNumber || '').trim();
-  if (!tagNumber) throw new LedgerError('A bag tag number is required.', 'MISSING_FIELD');
+  // A crew bagging into a pre-printed tag types that number; otherwise the
+  // project's counter supplies one, as FMRv3 did. Either way nobody has to
+  // invent a number that must not collide.
+  const tagNumber = String(req.bagTagNumber || '').trim()
+    || await nextBagTagNumber(client, line.project_id);
 
   const storageLocation = req.storageLocation || line.storage_location;
 
@@ -268,7 +271,7 @@ async function reserveIntoBag(client, line, req, user, correlationId) {
     notes: req.notes
   });
 
-  return tag.id;
+  return { bagTagId: tag.id, tagNumber };
 }
 
 /**
@@ -355,6 +358,9 @@ export async function performFieldAction(ctx, req) {
 
     let newlyLocated = 0;
     let backorderRequestId = null;
+    // The tag a bagging went into, so the crew can be told which number to
+    // write on the bag when the server assigned it.
+    let bagTagNumber = null;
     // BAG and ISSUE_FROM_BAG write their own transaction rows, since they
     // need the bag id that only becomes known inside those helpers.
     let transactionWritten = false;
@@ -373,7 +379,9 @@ export async function performFieldAction(ctx, req) {
           throw new LedgerError('Storage location is required.', 'MISSING_FIELD');
         }
         newlyLocated = applyBag(state, req.quantity);
-        await reserveIntoBag(client, line, req, user, correlationId);
+        ({ tagNumber: bagTagNumber } = await reserveIntoBag(
+          client, line, req, user, correlationId
+        ));
         transactionWritten = true;
         break;
 
@@ -450,6 +458,7 @@ export async function performFieldAction(ctx, req) {
       action,
       correlationId,
       noticesSettled: notices.resolved,
+      ...(bagTagNumber ? { bagTagNumber } : {}),
       line: serializeLine(updated),
       limits: actionLimits(lineState(updated))
     };
