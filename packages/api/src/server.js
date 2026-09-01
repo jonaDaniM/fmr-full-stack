@@ -24,6 +24,13 @@ import {
 import {
   stageWorkbook, getBatch, correctLine, publishBatch
 } from '../../import/src/staging.js';
+import { outstandingNotices } from '../../core/src/services/notices.js';
+import {
+  getCorrectableHistory, previewCorrection, applyCorrection, getCorrectionHistory
+} from '../../core/src/services/corrections.js';
+import {
+  getControls, setControls, getHealth, assertImportOpen
+} from '../../core/src/services/controls.js';
 import { readWorkbook } from '../../import/src/workbook.js';
 import { readFile as readProfileFile } from 'node:fs/promises';
 import {
@@ -256,6 +263,13 @@ route('POST', /^\/api\/import\/stage$/, async (req, res, { url }) => {
   }
   if (!size) throw new LedgerError('No file was uploaded.', 'NO_FILE');
 
+  const client = await pool.connect();
+  try {
+    await assertImportOpen(client, ctx.projectId);
+  } finally {
+    client.release();
+  }
+
   const profile = await loadProfile(profileName);
   const sheets = readWorkbook(Buffer.concat(chunks), filename);
 
@@ -301,6 +315,75 @@ route('POST', /^\/api\/import\/publish$/, async (req, res) => {
   );
 
   json(res, 200, result);
+});
+
+// --- notices ---------------------------------------------------------------
+
+route('GET', /^\/api\/notices$/, async (req, res) => {
+  const ctx = await authenticate(req);
+  requirePermission(ctx, 'search');
+  await withClient(ctx, async (c) => ({
+    notices: await outstandingNotices(c, ctx.projectId)
+  }), res);
+});
+
+// --- corrections -----------------------------------------------------------
+
+route('GET', /^\/api\/lines\/([0-9a-f-]{36})\/corrections$/, async (req, res, { match }) => {
+  const ctx = await authenticate(req);
+  requirePermission(ctx, 'ownerEdit');
+  await withClient(ctx, async (c) => ({
+    groups: await getCorrectableHistory(c, ctx.projectId, match[1])
+  }), res);
+});
+
+/** Show what a correction would do. Writes nothing. */
+route('POST', /^\/api\/corrections\/preview$/, async (req, res) => {
+  const ctx = await authenticate(req);
+  requirePermission(ctx, 'ownerEdit');
+  json(res, 200, await previewCorrection(ctx, await readBody(req)));
+});
+
+route('POST', /^\/api\/corrections\/apply$/, async (req, res) => {
+  const ctx = await authenticate(req);
+  requirePermission(ctx, 'ownerEdit');
+
+  const body = await readBody(req);
+  const result = await once(
+    req.headers['idempotency-key'],
+    ctx.user,
+    body,
+    () => applyCorrection(ctx, body)
+  );
+  json(res, 200, result);
+});
+
+route('GET', /^\/api\/corrections$/, async (req, res) => {
+  const ctx = await authenticate(req);
+  requirePermission(ctx, 'ownerEdit');
+  await withClient(ctx, async (c) => ({
+    corrections: await getCorrectionHistory(c, ctx.projectId)
+  }), res);
+});
+
+// --- controls --------------------------------------------------------------
+
+route('GET', /^\/api\/controls$/, async (req, res) => {
+  const ctx = await authenticate(req);
+  requirePermission(ctx, 'search');
+  await withClient(ctx, (c) => getControls(c, ctx.projectId), res);
+});
+
+route('POST', /^\/api\/controls$/, async (req, res) => {
+  const ctx = await authenticate(req);
+  requirePermission(ctx, 'ownerEdit');
+  json(res, 200, await setControls(ctx, await readBody(req)));
+});
+
+route('GET', /^\/api\/project-health$/, async (req, res) => {
+  const ctx = await authenticate(req);
+  requirePermission(ctx, 'search');
+  await withClient(ctx, (c) => getHealth(c, ctx.projectId), res);
 });
 
 route('GET', /^\/api\/health$/, async (_req, res) => {

@@ -31,7 +31,7 @@ packages/core/
   src/services/    the rules applied to the database, in transactions
   test/            unit tests
 packages/api/      http, auth, idempotency
-packages/web/      field, office and import interfaces
+packages/web/      field, office, owner and import interfaces
 packages/import/   workbook extraction, profiles, staging
 packages/migrate/  loading the old spreadsheet
 ```
@@ -109,6 +109,40 @@ original row, the returned remainder becomes a new row linked by
 When material is later located, outstanding backorders settle against it
 automatically — confirmed commitments first, oldest first.
 
+## Notices
+
+When the office decides on a backorder, the crew who raised it needs to know —
+on the line's own card, in words that say what to do next. A rejection means
+"nobody is sourcing this, go and find it." A return means "we need more from
+you first."
+
+A notice is outstanding work, not a log entry. It carries a quantity and is
+settled as the crew works through it: locating material against a rejected
+notice is what closes it, oldest notice first. Dismissing it is not an option,
+because the material still has to be found.
+
+## Corrections
+
+People mis-key quantities. The fix is never an edit — the original transaction
+is what actually happened, and an audit trail that can be rewritten is not one.
+A correction writes the opposite entry and moves the ledger back.
+
+Corrections are previewed before they are applied: this is the one operation
+where quantities move without a physical event behind them, so the owner sees
+the before and after first. A reason is required and kept. The same set of
+transactions cannot be corrected twice.
+
+## Operational controls
+
+An owner can pause material movement on a project — during a cutover, a stock
+count, or when the ledger needs to hold still. The pause is checked inside each
+action's transaction, so one taken mid-action still holds, and crews are shown
+the reason rather than an error.
+
+Health reporting covers only what is specific to this workflow: backorders
+nobody has decided on, notices the crews have not acted on, bags sitting
+unissued. Backups and uptime are the database's job, not the application's.
+
 ## Import
 
 Workbooks are parsed into a staging batch and reviewed before anything becomes
@@ -155,4 +189,3 @@ partly applied.
 - The Python FMR generator (`industrial-iso-takeoff-toolkit`) wired into the UI
 - Per-project extraction profiles beyond the baseline — these need real
   drawings from each project to tune
-- Health, backup and recovery dashboards

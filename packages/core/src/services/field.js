@@ -17,6 +17,8 @@ import {
 import {
   planLocationTransitions, applyLocationTransitions, BACKORDER_STATUS
 } from '../domain/backorder.js';
+import { settleNotices, sweepStaleNotices } from './notices.js';
+import { assertFieldOpen } from './controls.js';
 
 /** Lock one line for update, scoped to the caller's project. */
 async function lockLine(client, lineId, projectId) {
@@ -249,6 +251,9 @@ export async function performFieldAction(ctx, req) {
   const correlationId = randomUUID();
 
   return withTransaction(async (client) => {
+    // Checked inside the transaction so a pause taken mid-action still holds.
+    await assertFieldOpen(client, projectId);
+
     const line = await lockLine(client, req.lineId, projectId);
     const state = lineState(line);
 
@@ -313,6 +318,9 @@ export async function performFieldAction(ctx, req) {
     const settlement = await settleBackorders(client, line, state, newlyLocated);
     await persistState(client, line, state, user.id);
 
+    // The crew was told to do something; doing it settles the notice.
+    const notices = await settleNotices(client, line, action, Number(req.quantity));
+
     if (!transactionWritten) {
       await recordTransaction(client, line, action, Number(req.quantity), user, {
         correlationId,
@@ -327,8 +335,11 @@ export async function performFieldAction(ctx, req) {
     await recordAudit(client, line, action, user, correlationId, {
       quantity: Number(req.quantity),
       backordersSettled: settlement.confirmedConsumed + settlement.pendingConsumed,
+      noticesSettled: notices.resolved,
       ...(req.notes ? { notes: req.notes } : {})
     });
+
+    await sweepStaleNotices(client, line.id);
 
     await client.query(
       `UPDATE fmr_headers
@@ -344,6 +355,7 @@ export async function performFieldAction(ctx, req) {
       ok: true,
       action,
       correlationId,
+      noticesSettled: notices.resolved,
       line: serializeLine(updated),
       limits: actionLimits(lineState(updated))
     };

@@ -10,6 +10,7 @@ import { withTransaction } from '../db/pool.js';
 import { LedgerError, lineState, lineStatus } from '../domain/ledger.js';
 import { planAdminDecision, BACKORDER_STATUS } from '../domain/backorder.js';
 import { serializeLine } from './field.js';
+import { raiseNotice, noticesForLines } from './notices.js';
 
 /** The queue the office works from, newest requests last. */
 export async function getBackorderQueue(client, projectId, { status } = {}) {
@@ -138,6 +139,17 @@ export async function decideBackorder(ctx, req) {
       [line.id, state.pendingBackorder, state.confirmedBackorder, lineStatus(state), user.id]
     );
 
+    // Tell the crew what was decided, on the line they raised it from.
+    const notice = await raiseNotice(client, {
+      line,
+      request,
+      decision,
+      quantity: plan.quantity,
+      uom: line.uom,
+      adminNotes: req.notes,
+      fullyDecided: plan.update.qty_pending === 0
+    });
+
     await client.query(
       `INSERT INTO audit_log
          (project_id, entity_type, entity_id, action, payload, user_id, user_email,
@@ -149,7 +161,7 @@ export async function decideBackorder(ctx, req) {
           quantity: plan.quantity,
           notes: req.notes ?? null,
           splitRequestId,
-          notifyField: plan.notifyField
+          noticeId: notice?.id ?? null
         },
         user.id, user.email, correlationId
       ]
@@ -168,32 +180,19 @@ export async function decideBackorder(ctx, req) {
       correlationId,
       quantity: plan.quantity,
       splitRequestId,
-      notifyField: plan.notifyField,
+      noticeRaised: notice ? { id: notice.id, headline: notice.headline } : null,
       line: serializeLine(freshLine[0])
     };
   });
 }
 
-/** Notices the field crew needs to see: rejected or returned requests. */
-export async function getFieldNotices(client, projectId, lineIds) {
-  if (!lineIds?.length) return {};
-
-  const { rows } = await client.query(
-    `SELECT * FROM backorder_requests
-      WHERE project_id = $1
-        AND fmr_line_id = ANY($2::uuid[])
-        AND active
-        AND status IN ($3, $4)
-      ORDER BY updated_at DESC`,
-    [projectId, lineIds, BACKORDER_STATUS.REJECTED, BACKORDER_STATUS.RETURNED]
-  );
-
-  const byLine = {};
-  for (const row of rows) {
-    (byLine[row.fmr_line_id] ??= []).push(serializeBackorder(row));
-  }
-  return byLine;
-}
+/**
+ * Notices the field crew needs to see.
+ *
+ * Kept as a re-export so callers have one place to ask; the notices service
+ * owns the lifecycle.
+ */
+export const getFieldNotices = noticesForLines;
 
 function serializeBackorder(row) {
   return {
