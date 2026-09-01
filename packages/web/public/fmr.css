@@ -611,6 +611,11 @@ button.issue:hover { filter: brightness(0.97); }
 
 /* --- field screen ----------------------------------------------------------- */
 
+/* The field screen is designed for a phone held in one hand. On a desk monitor
+   it keeps that column rather than stretching a 48px tap target across two
+   thousand pixels — the layout a crew sees is the layout the office reviews. */
+.searchbar, .list, #hint { width: min(100%, 620px); margin-inline: auto; }
+
 .searchbar { display: flex; gap: var(--s-2); padding: var(--s-3) var(--s-4); }
 .searchbar input {
   flex: 1; min-width: 0; font: inherit; font-size: var(--t-lg);
@@ -782,7 +787,9 @@ button.issue:hover { filter: brightness(0.97); }
   display: flex; flex-wrap: wrap; gap: var(--s-2);
   padding: var(--s-3) var(--s-4); border-top: 1px solid var(--rule);
 }
-.acts .btn { flex: 1 1 auto; min-width: 96px; min-height: 44px; }
+/* Grow to share a row, but never past a width that reads as a button. A lone
+   action on a wide screen used to stretch the full width of the card. */
+.acts .btn { flex: 1 1 auto; min-width: 96px; max-width: 200px; min-height: 44px; }
 
 /* --- import drop zone ------------------------------------------------------- */
 
