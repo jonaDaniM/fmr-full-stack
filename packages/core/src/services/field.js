@@ -49,7 +49,7 @@ function assertWithin(value, limit, label) {
  */
 export const HEADER_ROLLUP_SQL = `
   UPDATE fmr_headers h
-     SET last_activity_at = now(), updated_at = now(), updated_by = $2,
+     SET last_activity_at = now(), updated_at = now(), updated_by = $2::uuid,
          current_status = rollup.status
     FROM (
       SELECT CASE
@@ -62,9 +62,9 @@ export const HEADER_ROLLUP_SQL = `
                ELSE 'Open'
              END AS status
         FROM fmr_lines
-       WHERE fmr_id = $1 AND active
+       WHERE fmr_id = $1::uuid AND active
     ) rollup
-   WHERE h.id = $1`;
+   WHERE h.id = $1::uuid`;
 
 /** Lock one line for update, scoped to the caller's project. */
 async function lockLine(client, lineId, projectId) {
@@ -150,11 +150,12 @@ async function settleBackorders(client, line, state, newlyLocated) {
   for (const step of plan.confirmedSteps) {
     await client.query(
       `UPDATE backorder_requests
-          SET qty_confirmed = $2,
-              status = CASE WHEN $2 = 0 AND qty_pending = 0 THEN $3 ELSE status END,
-              active = NOT ($2 = 0 AND qty_pending = 0),
+          SET qty_confirmed = $2::numeric,
+              status = CASE WHEN $2::numeric = 0 AND qty_pending = 0
+                            THEN $3 ELSE status END,
+              active = NOT ($2::numeric = 0 AND qty_pending = 0),
               updated_at = now()
-        WHERE id = $1`,
+        WHERE id = $1::uuid`,
       [step.requestId, step.remainingConfirmed, BACKORDER_STATUS.FULFILLED]
     );
   }
@@ -162,11 +163,12 @@ async function settleBackorders(client, line, state, newlyLocated) {
   for (const step of plan.pendingSteps) {
     await client.query(
       `UPDATE backorder_requests
-          SET qty_pending = $2,
-              status = CASE WHEN $2 = 0 AND qty_confirmed = 0 THEN $3 ELSE status END,
-              active = NOT ($2 = 0 AND qty_confirmed = 0),
+          SET qty_pending = $2::numeric,
+              status = CASE WHEN $2::numeric = 0 AND qty_confirmed = 0
+                            THEN $3 ELSE status END,
+              active = NOT ($2::numeric = 0 AND qty_confirmed = 0),
               updated_at = now()
-        WHERE id = $1`,
+        WHERE id = $1::uuid`,
       [step.requestId, step.remainingPending, BACKORDER_STATUS.FULFILLED]
     );
   }

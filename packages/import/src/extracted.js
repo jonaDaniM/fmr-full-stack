@@ -13,7 +13,7 @@
  */
 
 import { parseCsv } from '../../migrate/src/index.js';
-import { normalizeIso, normalizeSheet } from './normalize.js';
+import { normalizeIso, normalizeSheet, normalizeQuantity, normalizeSize, inferUom } from './normalize.js';
 import { SEVERITY } from './extract.js';
 
 /** Below this the extractor was guessing; the row is flagged for a person. */
@@ -65,18 +65,37 @@ export function groupExtractedRows(csvText, { minConfidence = 0 } = {}) {
     const drawing = byDrawing.get(key);
     const lineNumber = drawing.lines.length + 1;
 
+    // Normalised here rather than left as text: the columns these land in are
+    // numeric, and a blank quantity is a null, not an empty string.
+    const quantity = normalizeQuantity(row.quantity);
+    const description = clean(row.description);
+    const { uom, rule } = inferUom(description, row.uom, row.quantity);
+
     drawing.lines.push({
       lineNumber,
       sourceRow: Number(row.page_number) || null,
       commodityCode: clean(row.commodity_code) || null,
-      size: clean(row.size) || null,
-      description: clean(row.description) || null,
-      quantity: clean(row.quantity),
-      uom: clean(row.uom) || null,
+      size: normalizeSize(row.size),
+      description: description || null,
+      quantity,
+      uom,
+      uomRule: rule,
       storageLocation: null,
       category: clean(row.category) || null,
       confidence
     });
+
+    // A line with no quantity cannot become material to go and find, so this
+    // blocks publishing until someone supplies it.
+    if (quantity == null) {
+      drawing.issues.push({
+        severity: SEVERITY.ERROR,
+        code: 'NO_QUANTITY',
+        message: `Line ${lineNumber}: no quantity could be read from `
+          + `"${clean(row.quantity)}". Enter one before publishing.`,
+        row: lineNumber
+      });
+    }
 
     // The extractor's own doubts, carried to the line they belong to.
     if (confidence < REVIEW_THRESHOLD) {

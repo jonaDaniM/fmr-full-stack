@@ -45,11 +45,17 @@ test("the extractor's doubts follow the line they belong to", () => {
   ));
 
   const issues = sheets[0].issues;
-  assert.equal(issues.length, 1, 'only the doubtful row is flagged');
-  assert.equal(issues[0].code, 'LOW_CONFIDENCE');
-  assert.equal(issues[0].row, 2, 'pointing at the line, not the file');
-  assert.match(issues[0].message, /no quantity; no size/, 'saying what was wrong');
-  assert.match(issues[0].message, /0\.55/);
+  assert.ok(issues.every((i) => i.row === 2), 'every issue points at the doubtful line');
+
+  const doubt = issues.find((i) => i.code === 'LOW_CONFIDENCE');
+  assert.ok(doubt, 'the confidence itself is reported');
+  assert.match(doubt.message, /no quantity; no size/, 'saying what the extractor found');
+  assert.match(doubt.message, /0\.55/);
+
+  // No quantity is not just doubt — the line cannot become material to find.
+  const blocking = issues.find((i) => i.code === 'NO_QUANTITY');
+  assert.ok(blocking, 'a missing quantity blocks publishing');
+  assert.equal(blocking.severity, 'error');
 });
 
 test('a confident row raises nothing', () => {

@@ -154,29 +154,30 @@ export async function getLineHistory(client, projectId, lineId) {
 
 /** A shift summary: what moved today, and what is waiting. */
 export async function getDashboard(client, projectId) {
-  const [activity, queue, bags] = await Promise.all([
-    client.query(
+  // One client cannot run queries in parallel, so these go in sequence.
+  const [activity, queue, bags] = [
+    await client.query(
       `SELECT transaction_type, count(*) AS n, coalesce(sum(quantity), 0) AS qty
          FROM material_transactions
         WHERE project_id = $1 AND created_at > now() - interval '24 hours'
         GROUP BY transaction_type`,
       [projectId]
     ),
-    client.query(
+    await client.query(
       `SELECT status, count(*) AS n, coalesce(sum(qty_pending), 0) AS qty
          FROM backorder_requests
         WHERE project_id = $1 AND active
         GROUP BY status`,
       [projectId]
     ),
-    client.query(
+    await client.query(
       `SELECT count(*) AS n, coalesce(sum(i.qty_remaining_in_bag), 0) AS qty
          FROM bag_tag_items i
          JOIN bag_tags t ON t.id = i.bag_tag_id
         WHERE t.project_id = $1 AND i.status = 'Active'`,
       [projectId]
     )
-  ]);
+  ];
 
   return {
     last24h: Object.fromEntries(
