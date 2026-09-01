@@ -9,7 +9,7 @@ import { randomUUID } from 'node:crypto';
 import { withTransaction } from '../db/pool.js';
 import { LedgerError, lineState, lineStatus } from '../domain/ledger.js';
 import { planAdminDecision, BACKORDER_STATUS } from '../domain/backorder.js';
-import { serializeLine } from './field.js';
+import { serializeLine, HEADER_ROLLUP_SQL } from './field.js';
 import { raiseNotice, noticesForLines } from './notices.js';
 
 /** The queue the office works from, newest requests last. */
@@ -166,6 +166,10 @@ export async function decideBackorder(ctx, req) {
         user.id, user.email, correlationId
       ]
     );
+
+    // Confirming or rejecting changes what the line is waiting on, which can
+    // change how the FMR reads in the register.
+    await client.query(HEADER_ROLLUP_SQL, [line.fmr_id, user.id]);
 
     const { rows: freshLine } = await client.query(
       `SELECT l.*, h.fmr_number FROM fmr_lines l

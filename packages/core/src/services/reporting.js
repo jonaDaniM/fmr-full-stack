@@ -6,8 +6,14 @@
  * in Apps Script; here they are single aggregate queries.
  */
 
-/** Every FMR with its progress. The register view. */
-export async function getRegister(client, projectId) {
+/**
+ * Every FMR with its progress. The register view.
+ *
+ * Filters are optional and narrow the list; the choices offered come back
+ * alongside the rows, built from what is actually present rather than a fixed
+ * list, so a priority nobody uses does not appear.
+ */
+export async function getRegister(client, projectId, { status, priority } = {}) {
   const { rows } = await client.query(
     `SELECT h.id, h.fmr_number, h.iwp_number, h.requested_by, h.date_required,
             h.priority, h.current_status, h.last_activity_at,
@@ -22,9 +28,11 @@ export async function getRegister(client, projectId) {
        FROM fmr_headers h
        LEFT JOIN fmr_lines l ON l.fmr_id = h.id AND l.active
       WHERE h.project_id = $1 AND h.active
+        AND ($2::text IS NULL OR h.current_status = $2)
+        AND ($3::text IS NULL OR h.priority = $3)
       GROUP BY h.id
       ORDER BY h.date_required NULLS LAST, h.fmr_number`,
-    [projectId]
+    [projectId, status ?? null, priority ?? null]
   );
 
   const fmrs = rows.map((row) => ({
@@ -56,8 +64,24 @@ export async function getRegister(client, projectId) {
     { lines: 0, requested: 0, issued: 0, backordered: 0 }
   );
 
+  // The choices to offer, drawn from what this project actually has, so the
+  // filter never lists a status or priority with nothing behind it.
+  const { rows: options } = await client.query(
+    `SELECT array_agg(DISTINCT current_status) FILTER (WHERE current_status IS NOT NULL)
+              AS statuses,
+            array_agg(DISTINCT priority) FILTER (WHERE priority IS NOT NULL)
+              AS priorities
+       FROM fmr_headers WHERE project_id = $1 AND active`,
+    [projectId]
+  );
+
   return {
     fmrs,
+    filters: {
+      statuses: (options[0].statuses ?? []).sort(),
+      priorities: (options[0].priorities ?? []).sort()
+    },
+    applied: { status: status ?? null, priority: priority ?? null },
     totals: { ...totals, fulfillmentPct: pct(totals.issued, totals.requested) }
   };
 }

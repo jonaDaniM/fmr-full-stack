@@ -10,7 +10,7 @@ import { randomUUID } from 'node:crypto';
 import { withTransaction } from '../db/pool.js';
 import { LedgerError, lineState, lineStatus } from '../domain/ledger.js';
 import { planCorrection } from '../domain/corrections.js';
-import { serializeLine } from './field.js';
+import { serializeLine, HEADER_ROLLUP_SQL } from './field.js';
 import { sweepStaleNotices } from './notices.js';
 
 /**
@@ -223,6 +223,8 @@ export async function applyCorrection(ctx, { correlationId, reason }) {
     );
 
     await sweepStaleNotices(client, line.id);
+    // A correction moves quantities, so the FMR's own status can change with it.
+    await client.query(HEADER_ROLLUP_SQL, [line.fmr_id, user.id]);
 
     const { rows: fresh } = await client.query(
       `SELECT l.*, h.fmr_number FROM fmr_lines l

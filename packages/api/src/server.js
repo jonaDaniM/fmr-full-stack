@@ -218,10 +218,13 @@ async function withClient(ctx, handler, res) {
   }
 }
 
-route('GET', /^\/api\/register$/, async (req, res) => {
+route('GET', /^\/api\/register$/, async (req, res, { url }) => {
   const ctx = await authenticate(req);
   requirePermission(ctx, 'search');
-  await withClient(ctx, (c) => getRegister(c, ctx.projectId), res);
+  await withClient(ctx, (c) => getRegister(c, ctx.projectId, {
+    status: url.searchParams.get('status') || undefined,
+    priority: url.searchParams.get('priority') || undefined
+  }), res);
 });
 
 route('GET', /^\/api\/iso-summary$/, async (req, res) => {

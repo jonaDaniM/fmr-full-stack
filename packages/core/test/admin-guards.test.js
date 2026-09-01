@@ -99,3 +99,38 @@ test('guards raise LedgerError, so the API answers 422 rather than 500', async (
     }
   );
 });
+
+// --- field text limits -----------------------------------------------------
+
+test('free-text fields are capped before they reach the database', async () => {
+  const { performFieldAction, TEXT_LIMITS } = await import('../src/services/field.js');
+
+  const tooLong = (field, limit) => performFieldAction(
+    { user: { id: 'u1', email: 'a@b.com' }, projectId: 'p1' },
+    { action: 'CONFIRM_AVAILABLE', lineId: 'l1', quantity: 1, [field]: 'x'.repeat(limit + 1) }
+  );
+
+  await assert.rejects(tooLong('storageLocation', TEXT_LIMITS.storageLocation),
+    /Storage location is too long/);
+  await assert.rejects(tooLong('notes', TEXT_LIMITS.notes), /Notes is too long/);
+  await assert.rejects(tooLong('issuedToName', TEXT_LIMITS.issuedToName),
+    /Issued-to name is too long/);
+  await assert.rejects(tooLong('bagTagNumber', TEXT_LIMITS.bagTagNumber),
+    /Bag tag number is too long/);
+});
+
+test('a value exactly at the limit is accepted', async () => {
+  const { performFieldAction, TEXT_LIMITS } = await import('../src/services/field.js');
+
+  // Reaches the database, so a connection error means the cap let it through.
+  await assert.rejects(
+    performFieldAction(
+      { user: { id: 'u1', email: 'a@b.com' }, projectId: 'p1' },
+      {
+        action: 'CONFIRM_AVAILABLE', lineId: 'l1', quantity: 1,
+        storageLocation: 'x'.repeat(TEXT_LIMITS.storageLocation)
+      }
+    ),
+    (error) => !/too long/.test(error.message)
+  );
+});

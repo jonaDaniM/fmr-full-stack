@@ -21,6 +21,51 @@ import {
 import { settleNotices, sweepStaleNotices } from './notices.js';
 import { assertFieldOpen } from './controls.js';
 
+/** Caps on the free-text fields a crew types, matching FMRv3. */
+export const TEXT_LIMITS = Object.freeze({
+  storageLocation: 100,
+  notes: 500,
+  issuedToName: 120,
+  bagTagNumber: 40
+});
+
+function assertWithin(value, limit, label) {
+  if (value != null && String(value).length > limit) {
+    throw new LedgerError(
+      `${label} is too long — keep it under ${limit} characters.`, 'TOO_LONG'
+    );
+  }
+}
+
+/**
+ * Roll the header's status up from its lines, and stamp the activity time.
+ *
+ * The header carries no quantities of its own — the register sums them from
+ * the lines, so there is nothing to keep in step. Status is the exception: it
+ * is what someone scanning a list of FMRs reads, so it is derived here rather
+ * than recomputed on every read.
+ *
+ * Takes ($1 fmrId, $2 userId).
+ */
+export const HEADER_ROLLUP_SQL = `
+  UPDATE fmr_headers h
+     SET last_activity_at = now(), updated_at = now(), updated_by = $2,
+         current_status = rollup.status
+    FROM (
+      SELECT CASE
+               WHEN coalesce(sum(qty_remaining_requirement), 0) <= 0
+                 AND coalesce(sum(qty_requested), 0) > 0        THEN 'Complete'
+               WHEN coalesce(sum(qty_issued), 0) > 0            THEN 'Partially Issued'
+               WHEN coalesce(sum(qty_pending_backorder), 0)
+                  + coalesce(sum(qty_confirmed_backorder), 0) > 0 THEN 'Backordered'
+               WHEN coalesce(sum(qty_confirmed_located), 0) > 0  THEN 'In Progress'
+               ELSE 'Open'
+             END AS status
+        FROM fmr_lines
+       WHERE fmr_id = $1 AND active
+    ) rollup
+   WHERE h.id = $1`;
+
 /** Lock one line for update, scoped to the caller's project. */
 async function lockLine(client, lineId, projectId) {
   const { rows } = await client.query(
@@ -292,6 +337,13 @@ export async function performFieldAction(ctx, req) {
   const action = String(req.action || '').toUpperCase();
   const correlationId = randomUUID();
 
+  // Free-text fields are typed on a phone in a warehouse. Cap them rather than
+  // letting a stuck key fill a column.
+  assertWithin(req.storageLocation, TEXT_LIMITS.storageLocation, 'Storage location');
+  assertWithin(req.notes, TEXT_LIMITS.notes, 'Notes');
+  assertWithin(req.issuedToName, TEXT_LIMITS.issuedToName, 'Issued-to name');
+  assertWithin(req.bagTagNumber, TEXT_LIMITS.bagTagNumber, 'Bag tag number');
+
   return withTransaction(async (client) => {
     // Checked inside the transaction so a pause taken mid-action still holds.
     await assertFieldOpen(client, projectId);
@@ -384,9 +436,7 @@ export async function performFieldAction(ctx, req) {
     await sweepStaleNotices(client, line.id);
 
     await client.query(
-      `UPDATE fmr_headers
-          SET last_activity_at = now(), updated_at = now(), updated_by = $2
-        WHERE id = $1`,
+      HEADER_ROLLUP_SQL,
       [line.fmr_id, user.id]
     );
 
