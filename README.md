@@ -29,9 +29,11 @@ db/seed/           demo data
 packages/core/
   src/domain/      the rules — pure, no database
   src/services/    the rules applied to the database, in transactions
-  test/            unit tests over the domain
+  test/            unit tests
 packages/api/      http, auth, idempotency
-packages/web/      field interface
+packages/web/      field, office and import interfaces
+packages/import/   workbook extraction, profiles, staging
+packages/migrate/  loading the old spreadsheet
 ```
 
 The domain layer has no database dependency, which is why its tests run in
@@ -107,9 +109,50 @@ original row, the returned remainder becomes a new row linked by
 When material is later located, outstanding backorders settle against it
 automatically — confirmed commitments first, oldest first.
 
+## Import
+
+Workbooks are parsed into a staging batch and reviewed before anything becomes
+a real FMR. Errors block publishing; warnings do not. Quantities and sizes can
+be corrected in the review screen.
+
+Drawings keep a similar shape between projects but never quite the same one, so
+the engine is fixed and the variation lives in a **profile** — a JSON file per
+project naming the labels and column headings that project uses.
+`packages/import/profiles/default.json` is the baseline; copy it and adjust.
+
+Normalisation rules that hold everywhere live in `import/src/normalize.js`.
+The one worth knowing about: Excel silently converts pipe sizes to dates when a
+sheet is opened, so `1/2"` arrives as `2-Jan`. That is recovered, along with
+mixed fractions, decimal sizes, and units inferred from the description — a
+crew sent to find 20 feet of elbows has been sent wrong.
+
+### XLSX parsing
+
+The `xlsx` package on the npm registry is unmaintained and carries unfixed
+prototype-pollution and ReDoS advisories, so it is deliberately **not** a
+dependency. `packages/import/src/workbook.js` takes a parser by injection:
+install SheetJS from their own CDN (`cdn.sheetjs.com`, the supported route) or
+a maintained alternative, then call `setXlsxParser()`. CSV needs no parser and
+works out of the box.
+
+## Migrating the spreadsheet
+
+```bash
+node packages/migrate/src/index.js --dir=./export --project=GC-2026        # dry run
+node packages/migrate/src/index.js --dir=./export --project=GC-2026 --apply
+```
+
+Export each sheet as CSV into one directory, keeping the sheet names.
+
+The dry run validates every line against the invariants the database enforces
+and reports what would fail. This matters: a spreadsheet lets quantities drift
+out of agreement, and a database will not — so drift has to be found before the
+load, not halfway through it. A batch with problems is refused rather than
+partly applied.
+
 ## Not yet built
 
-- Bulk import from Excel
-- The Python FMR generator, wired into the UI
-- Registers, ISO summaries, reporting
-- Migration of existing spreadsheet data
+- The Python FMR generator (`industrial-iso-takeoff-toolkit`) wired into the UI
+- Per-project extraction profiles beyond the baseline — these need real
+  drawings from each project to tune
+- Health, backup and recovery dashboards

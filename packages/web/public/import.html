@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FMR Import</title>
+<link rel="stylesheet" href="/app.css">
+<link rel="stylesheet" href="/admin.css">
+<style>
+  .drop {
+    border: 2px dashed var(--rule); border-radius: 12px;
+    padding: 40px 20px; text-align: center; background: var(--card);
+    margin-bottom: 20px;
+  }
+  .drop.over { border-color: var(--accent); background: var(--ok-bg); }
+  .drop p { margin: 0 0 12px; color: var(--muted); }
+  .drop label {
+    display: inline-block; font-weight: 600; cursor: pointer;
+    background: var(--accent); color: var(--accent-ink);
+    padding: 10px 20px; border-radius: 9px;
+  }
+  .drop input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+
+  .issue { font-size: 13px; padding: 7px 12px; border-radius: 7px; margin-bottom: 5px; }
+  .issue.error { background: var(--danger-bg); color: var(--danger); }
+  .issue.warning { background: var(--warn-bg); color: var(--warn); }
+  .issue .where { font-weight: 700; margin-right: 6px; }
+
+  .item { margin-bottom: 20px; }
+  .item-head {
+    display: flex; align-items: center; gap: 10px;
+    padding: 12px 14px; background: var(--card);
+    border: 1px solid var(--rule); border-radius: 10px 10px 0 0;
+    border-bottom: 0; flex-wrap: wrap;
+  }
+  .item-head input[type=checkbox] { width: 18px; height: 18px; }
+  .item-head .name { font-weight: 700; }
+  .item .tw { border-radius: 0 0 10px 10px; }
+  .item.blocked .item-head { background: var(--danger-bg); }
+  .item.dup .item-head { background: var(--warn-bg); }
+  td[contenteditable] { outline: none; }
+  td[contenteditable]:focus { background: var(--ok-bg); box-shadow: inset 0 0 0 2px var(--accent); }
+  .publishbar {
+    position: sticky; bottom: 0; background: var(--card);
+    border-top: 1px solid var(--rule); padding: 14px 16px;
+    display: flex; align-items: center; gap: 14px; margin-top: 24px;
+  }
+  .publishbar button {
+    font: inherit; font-weight: 600; padding: 11px 24px; border-radius: 9px;
+    cursor: pointer; background: var(--accent); color: var(--accent-ink); border: 0;
+  }
+  .publishbar button:disabled { opacity: 0.4; cursor: not-allowed; }
+</style>
+</head>
+<body>
+<header class="topbar">
+  <span class="brand">FMR Import</span>
+  <span class="project"><select id="project" aria-label="Project"></select></span>
+</header>
+<main id="view"><p class="hint">Loading…</p></main>
+<script src="/import.js"></script>
+</body>
+</html>

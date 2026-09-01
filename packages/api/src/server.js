@@ -19,6 +19,14 @@ import {
 } from '../../core/src/services/backorderReview.js';
 import { searchLines, getFmrDetail } from '../../core/src/services/search.js';
 import {
+  getRegister, getIsoSummary, getLineHistory, getDashboard
+} from '../../core/src/services/reporting.js';
+import {
+  stageWorkbook, getBatch, correctLine, publishBatch
+} from '../../import/src/staging.js';
+import { readWorkbook } from '../../import/src/workbook.js';
+import { readFile as readProfileFile } from 'node:fs/promises';
+import {
   authenticate, require as requirePermission, verifyGoogleToken,
   findUser, recordLogin, issueSession, readSession, membershipsFor, AuthError
 } from './auth.js';
@@ -174,6 +182,122 @@ route('POST', /^\/api\/backorders\/decide$/, async (req, res) => {
     ctx.user,
     body,
     () => decideBackorder(ctx, body)
+  );
+
+  json(res, 200, result);
+});
+
+// --- reporting -------------------------------------------------------------
+
+/** Run a read-only handler with a pooled client, always released. */
+async function withClient(ctx, handler, res) {
+  const client = await pool.connect();
+  try {
+    json(res, 200, await handler(client));
+  } finally {
+    client.release();
+  }
+}
+
+route('GET', /^\/api\/register$/, async (req, res) => {
+  const ctx = await authenticate(req);
+  requirePermission(ctx, 'search');
+  await withClient(ctx, (c) => getRegister(c, ctx.projectId), res);
+});
+
+route('GET', /^\/api\/iso-summary$/, async (req, res) => {
+  const ctx = await authenticate(req);
+  requirePermission(ctx, 'search');
+  await withClient(ctx, (c) => getIsoSummary(c, ctx.projectId), res);
+});
+
+route('GET', /^\/api\/dashboard$/, async (req, res) => {
+  const ctx = await authenticate(req);
+  requirePermission(ctx, 'search');
+  await withClient(ctx, (c) => getDashboard(c, ctx.projectId), res);
+});
+
+route('GET', /^\/api\/lines\/([0-9a-f-]{36})\/history$/, async (req, res, { match }) => {
+  const ctx = await authenticate(req);
+  requirePermission(ctx, 'search');
+  await withClient(ctx, async (c) => ({
+    history: await getLineHistory(c, ctx.projectId, match[1])
+  }), res);
+});
+
+// --- import ----------------------------------------------------------------
+
+/** Load a project's extraction profile, falling back to the baseline. */
+async function loadProfile(name) {
+  const dir = join(dirname(fileURLToPath(import.meta.url)), '../../import/profiles');
+  const safe = String(name ?? 'default').replace(/[^a-z0-9_-]/gi, '');
+
+  try {
+    return JSON.parse(await readProfileFile(join(dir, `${safe}.json`), 'utf8'));
+  } catch {
+    return JSON.parse(await readProfileFile(join(dir, 'default.json'), 'utf8'));
+  }
+}
+
+/** Parse an uploaded workbook and stage it for review. Publishes nothing. */
+route('POST', /^\/api\/import\/stage$/, async (req, res, { url }) => {
+  const ctx = await authenticate(req);
+  requirePermission(ctx, 'ownerEdit');
+
+  const filename = url.searchParams.get('filename') ?? 'upload.xlsx';
+  const profileName = url.searchParams.get('profile') ?? 'default';
+
+  const chunks = [];
+  let size = 0;
+  for await (const chunk of req) {
+    size += chunk.length;
+    if (size > 25_000_000) throw new LedgerError('That file is too large.', 'TOO_LARGE');
+    chunks.push(chunk);
+  }
+  if (!size) throw new LedgerError('No file was uploaded.', 'NO_FILE');
+
+  const profile = await loadProfile(profileName);
+  const sheets = readWorkbook(Buffer.concat(chunks), filename);
+
+  const result = await stageWorkbook(ctx, {
+    sheets, sourceName: filename, profile, profileName
+  });
+
+  json(res, 200, result);
+});
+
+route('GET', /^\/api\/import\/([0-9a-f-]{36})$/, async (req, res, { match }) => {
+  const ctx = await authenticate(req);
+  requirePermission(ctx, 'ownerEdit');
+
+  const client = await pool.connect();
+  try {
+    const batch = await getBatch(client, ctx.projectId, match[1]);
+    if (!batch) return json(res, 404, { error: 'Import batch not found.' });
+    json(res, 200, batch);
+  } finally {
+    client.release();
+  }
+});
+
+route('POST', /^\/api\/import\/line$/, async (req, res) => {
+  const ctx = await authenticate(req);
+  requirePermission(ctx, 'ownerEdit');
+
+  const body = await readBody(req);
+  json(res, 200, { line: await correctLine(ctx, body) });
+});
+
+route('POST', /^\/api\/import\/publish$/, async (req, res) => {
+  const ctx = await authenticate(req);
+  requirePermission(ctx, 'ownerEdit');
+
+  const body = await readBody(req);
+  const result = await once(
+    req.headers['idempotency-key'],
+    ctx.user,
+    body,
+    () => publishBatch(ctx, body)
   );
 
   json(res, 200, result);

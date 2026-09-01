@@ -1,0 +1,37 @@
+{
+  "name": "Default FMR layout",
+  "description": "Baseline profile. Copy this per project and adjust the aliases to match that project's drawings.",
+
+  "headerSearchRows": 30,
+  "stopAfterBlankRows": 3,
+  "defaultSheet": "01",
+
+  "skipSheets": ["^instructions", "^notes$", "^legend", "^cover"],
+  "stopPatterns": ["^total", "^grand total", "^subtotal", "^end of"],
+
+  "header": {
+    "fmrNumber":   { "aliases": ["FMR No", "FMR Number", "FMR #", "FMR"], "required": true },
+    "iwpNumber":   { "aliases": ["IWP No", "IWP Number", "IWP #", "IWP"] },
+    "isoNumber":   { "aliases": ["ISO No", "ISO Number", "Drawing No", "Drawing", "ISO"], "required": true },
+    "isoSheet":    { "aliases": ["Sheet", "Sht", "Sheet No", "ISO Sheet"] },
+    "isoRevision": { "aliases": ["Rev", "Revision"] },
+    "requestedBy": { "aliases": ["Requested By", "Requestor", "Requested"] },
+    "dateRequired":{ "aliases": ["Date Required", "Required Date", "Need By", "RAD"] },
+    "priority":    { "aliases": ["Priority", "Urgency"] },
+    "destination": { "aliases": ["Destination", "Deliver To", "Delivery"] },
+    "warehouse":   { "aliases": ["Warehouse", "Store", "Stores"] },
+    "craft":       { "aliases": ["Craft", "Discipline"] }
+  },
+
+  "requiredColumns": ["quantity", "description"],
+
+  "columns": {
+    "lineNumber":      ["Item", "Item No", "Line", "No", "#"],
+    "commodityCode":   ["Commodity Code", "Commodity", "Cmdty", "Material Code", "Code", "Part No"],
+    "size":            ["Size", "NPS", "DN", "Dia", "Diameter"],
+    "description":     ["Description", "Material Description", "Material", "Desc"],
+    "quantity":        ["Qty", "Quantity", "Qty Req", "Qty Required", "Req Qty"],
+    "uom":             ["UOM", "Unit", "U/M", "Units"],
+    "storageLocation": ["Location", "Storage Location", "Bin", "Rack"]
+  }
+}

@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FMR Office</title>
+<link rel="stylesheet" href="/app.css">
+<link rel="stylesheet" href="/admin.css">
+</head>
+<body>
+<header class="topbar">
+  <span class="brand">FMR Office</span>
+  <nav class="tabs">
+    <button data-tab="queue" class="on">Backorders</button>
+    <button data-tab="register">Register</button>
+    <button data-tab="iso">By drawing</button>
+  </nav>
+  <span class="project">
+    <select id="project" aria-label="Project"></select>
+  </span>
+</header>
+
+<main id="view"><p class="hint">Loading…</p></main>
+
+<script src="/admin.js"></script>
+</body>
+</html>
