@@ -3,6 +3,9 @@
 Field Material Requisition tracking. A port of the FMRv3 Apps Script system
 onto Postgres, keeping the workflow and replacing the spreadsheet underneath it.
 
+For the database schema and how the packages fit together, see
+[ARCHITECTURE.md](ARCHITECTURE.md).
+
 ## What this is
 
 Crews search for a requisition line, then record what happened to the material:
