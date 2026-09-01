@@ -251,7 +251,7 @@ async function start() {
 
     renderDrop();
   } catch {
-    $('view').innerHTML = '<p class="hint">Please sign in to continue.</p>';
+    location.href = '/signin.html';
   }
 }
 

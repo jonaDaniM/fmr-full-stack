@@ -8,7 +8,9 @@
   "scripts": {
     "test": "node --test packages/core/test/*.test.js",
     "migrate": "node packages/core/src/db/migrate.js",
-    "api": "node packages/api/src/server.js"
+    "api": "node packages/api/src/server.js",
+    "start": "./start-local.sh",
+    "start:reset": "./start-local.sh --reset"
   },
   "dependencies": {
     "pg": "^8.23.0"

@@ -371,7 +371,7 @@ async function start() {
 
     await loadOptions();
   } catch {
-    $('hint').textContent = 'Please sign in to continue.';
+    location.href = '/signin.html';
   }
 }
 

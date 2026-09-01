@@ -42,19 +42,29 @@ milliseconds and why the rules can be read on their own.
 ## Running it
 
 ```bash
+brew services start postgresql@17    # once
 npm install
-createdb fmr
-export DATABASE_URL=postgres://localhost/fmr
-export SESSION_SECRET=$(openssl rand -hex 32)
-export GOOGLE_CLIENT_ID=...apps.googleusercontent.com
-
-npm run migrate
-node db/seed/seed.js
-npm run api          # http://localhost:3000
+npm start                            # http://localhost:3000
 ```
 
-Sign-in expects a Google account already present in `users`. The seed creates
-four; change the emails there to real ones to sign in.
+That creates the database, applies the migrations, seeds demo data if the
+database is empty, and starts the server. `npm run start:reset` drops it first.
+
+Sign in by picking one of the seeded users — start with Jonathan D., who is an
+owner and can see every screen. This local sign-in only exists when
+`FMR_DEV_LOGIN=1`, which `npm start` sets and no deployment should.
+
+### Deploying
+
+```bash
+export DATABASE_URL=postgres://…
+export SESSION_SECRET=$(openssl rand -hex 32)
+export GOOGLE_CLIENT_ID=…apps.googleusercontent.com
+npm run migrate && npm run api
+```
+
+Without `FMR_DEV_LOGIN`, sign-in is Google only, and an account must already
+exist in `users` — an owner adds people from the owner screen.
 
 ## Tests
 

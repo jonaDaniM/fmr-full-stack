@@ -109,6 +109,58 @@ route('POST', /^\/api\/auth\/google$/, async (req, res) => {
   });
 });
 
+/**
+ * Sign in as a seeded user, without Google.
+ *
+ * Only available when FMR_DEV_LOGIN is set, which no deployment should do.
+ * It exists so the system can be run and demonstrated locally before a Google
+ * OAuth client has been set up, and it refuses to work unless the environment
+ * has explicitly asked for it.
+ */
+route('POST', /^\/api\/auth\/dev$/, async (req, res) => {
+  if (process.env.FMR_DEV_LOGIN !== '1') {
+    throw new AuthError('Developer sign-in is not enabled here.', 403);
+  }
+
+  const { email } = await readBody(req);
+  const user = await findUser(email);
+  if (!user) throw new AuthError(`No account for ${email}.`, 403);
+
+  await recordLogin(user.id);
+  const token = issueSession(user);
+
+  // No Secure flag: local development is served over http.
+  res.setHeader(
+    'set-cookie',
+    `fmr_session=${token}; HttpOnly; SameSite=Lax; Path=/; Max-Age=43200`
+  );
+
+  json(res, 200, {
+    user: { id: user.id, email: user.email, name: user.display_name },
+    projects: await membershipsFor(user.id)
+  });
+});
+
+/** Who can be signed in as locally, so the page can offer a list. */
+route('GET', /^\/api\/auth\/dev$/, async (_req, res) => {
+  if (process.env.FMR_DEV_LOGIN !== '1') {
+    return json(res, 200, { enabled: false, users: [] });
+  }
+
+  const { rows } = await pool.query(
+    `SELECT DISTINCT u.email, u.display_name, m.role
+       FROM users u
+       JOIN project_members m ON m.user_id = u.id
+      WHERE u.active
+      ORDER BY m.role, u.display_name`
+  );
+
+  json(res, 200, {
+    enabled: true,
+    users: rows.map((r) => ({ email: r.email, name: r.display_name, role: r.role }))
+  });
+});
+
 route('POST', /^\/api\/auth\/signout$/, async (_req, res) => {
   res.setHeader('set-cookie', 'fmr_session=; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=0');
   json(res, 200, { ok: true });
