@@ -71,9 +71,9 @@ async function renderQueue() {
             ${rows[0].priority ? `&middot; ${esc(rows[0].priority)} priority` : ''}</span></h3>
         <div class="tw"><table>
           <thead><tr>
-            <th class="col-tiny">Line</th><th class="col-md">Drawing</th><th class="col-grow">Material</th>
-            <th class="num col-sm">Asked</th><th class="num col-sm">Pending</th><th class="num col-sm">Committed</th>
-            <th class="col-lg">Reason</th><th class="col-md">Raised</th><th class="col-lg"></th>
+            <th class="w-tiny">Line</th><th class="w-md">Drawing</th><th class="w-grow">Material</th>
+            <th class="num w-sm">Asked</th><th class="num w-sm">Pending</th><th class="num w-sm">Committed</th>
+            <th class="w-lg">Reason</th><th class="w-md">Raised</th><th class="w-lg"></th>
           </tr></thead>
           <tbody>${rows.map(renderQueueRow).join('')}</tbody>
         </table></div>
@@ -196,10 +196,10 @@ async function renderRegister() {
     </div>
     <div class="tw"><table>
       <thead><tr>
-        <th class="col-md">FMR</th><th class="col-md">IWP</th><th class="col-lg">Requested by</th>
-        <th class="col-sm">Needed</th><th class="col-sm">Priority</th><th class="num col-tiny">Lines</th>
-        <th class="num col-sm">Requested</th><th class="num col-sm">Issued</th>
-        <th class="num col-sm">Remaining</th><th class="col-md">Progress</th><th class="col-md"></th>
+        <th class="w-md">FMR</th><th class="w-md">IWP</th><th class="w-lg">Requested by</th>
+        <th class="w-sm">Needed</th><th class="w-sm">Priority</th><th class="num w-tiny">Lines</th>
+        <th class="num w-sm">Requested</th><th class="num w-sm">Issued</th>
+        <th class="num w-sm">Remaining</th><th class="w-md">Progress</th><th class="w-md"></th>
       </tr></thead>
       <tbody>${fmrs.map(renderRegisterRow).join('')
         || emptyRow(11, 'No FMRs on this project yet. Publish one from Drafts or Import.')}
@@ -256,10 +256,10 @@ async function openFmr(fmrId) {
     wide: true,
     body: `<div class="tw"><table>
         <thead><tr>
-          <th class="col-tiny">Line</th><th class="col-md">Drawing</th><th class="col-grow">Material</th>
-          <th class="num col-sm">Requested</th><th class="num col-sm">Available</th>
-          <th class="num col-sm">Bagged</th><th class="num col-sm">Issued</th>
-          <th class="num col-sm">Remaining</th><th class="col-md">Status</th>
+          <th class="w-tiny">Line</th><th class="w-md">Drawing</th><th class="w-grow">Material</th>
+          <th class="num w-sm">Requested</th><th class="num w-sm">Available</th>
+          <th class="num w-sm">Bagged</th><th class="num w-sm">Issued</th>
+          <th class="num w-sm">Remaining</th><th class="w-md">Status</th>
         </tr></thead>
         <tbody>${rows}</tbody>
       </table></div>`,
@@ -331,10 +331,10 @@ async function renderIso() {
     </div>
     <div class="tw"><table>
       <thead><tr>
-        <th class="col-md">Drawing</th><th class="col-sm">Sheet</th>
-        <th class="num col-tiny">Lines</th><th class="num col-tiny">FMRs</th>
-        <th class="num col-sm">Requested</th><th class="num col-sm">Issued</th>
-        <th class="num col-sm">Backordered</th><th class="col-md">Progress</th>
+        <th class="w-md">Drawing</th><th class="w-sm">Sheet</th>
+        <th class="num w-tiny">Lines</th><th class="num w-tiny">FMRs</th>
+        <th class="num w-sm">Requested</th><th class="num w-sm">Issued</th>
+        <th class="num w-sm">Backordered</th><th class="w-md">Progress</th>
       </tr></thead>
       <tbody>${drawings.map((d) => `
         <tr>

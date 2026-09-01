@@ -71,7 +71,7 @@ const SECURITY_HEADERS = {
     // 'unsafe-inline' covers style attributes only — progress bars and
     // fulfilment bars set their width inline. It does not admit inline
     // script, which is the direction an injection would need to go.
-    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.jsdelivr.net",
     'font-src https://fonts.gstatic.com',
     "img-src 'self' data:",
     "connect-src 'self'",
