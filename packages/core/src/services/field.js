@@ -15,7 +15,8 @@ import {
   applyIssueFromAvailable, applyIssueFromBag, applyBackorderRequest
 } from '../domain/ledger.js';
 import {
-  planLocationTransitions, applyLocationTransitions, BACKORDER_STATUS
+  planLocationTransitions, applyLocationTransitions,
+  planReturnedResubmission, BACKORDER_STATUS
 } from '../domain/backorder.js';
 import { settleNotices, sweepStaleNotices } from './notices.js';
 import { assertFieldOpen } from './controls.js';
@@ -223,7 +224,48 @@ async function reserveIntoBag(client, line, req, user, correlationId) {
   return tag.id;
 }
 
+/**
+ * Raise a backorder.
+ *
+ * If the office previously returned a request for this line asking for more
+ * information, this submission is the answer to it — so it revives that
+ * request rather than opening a second one alongside it.
+ */
 async function raiseBackorder(client, line, req, user, correlationId) {
+  const quantity = Number(req.quantity);
+
+  const { rows: existing } = await client.query(
+    `SELECT * FROM backorder_requests
+      WHERE fmr_line_id = $1 AND active
+      ORDER BY reported_at ASC`,
+    [line.id]
+  );
+
+  const plan = planReturnedResubmission(existing, quantity);
+
+  for (const step of plan.steps) {
+    await client.query(
+      `UPDATE backorder_requests
+          SET status = $2,
+              field_notes = coalesce($3, field_notes),
+              reported_at = now(),
+              returned_review_reason = NULL,
+              admin_decision = NULL,
+              updated_at = now()
+        WHERE id = $1`,
+      [
+        step.requestId,
+        step.revives ? BACKORDER_STATUS.PENDING : BACKORDER_STATUS.RETURNED,
+        req.notes ?? null
+      ]
+    );
+  }
+
+  // Anything the returned requests did not absorb becomes a new request.
+  if (plan.remainder <= 0) {
+    return plan.steps[0]?.requestId ?? null;
+  }
+
   const { rows } = await client.query(
     `INSERT INTO backorder_requests
        (project_id, fmr_id, fmr_line_id, qty_requested, qty_pending, reason,
@@ -231,7 +273,7 @@ async function raiseBackorder(client, line, req, user, correlationId) {
      VALUES ($1,$2,$3,$4,$4,$5,$6,$7,$8,$9,$10)
      RETURNING id`,
     [
-      line.project_id, line.fmr_id, line.id, Number(req.quantity), req.reason,
+      line.project_id, line.fmr_id, line.id, plan.remainder, req.reason,
       req.notes ?? null, user.id, req.performedByName ?? user.display_name,
       BACKORDER_STATUS.PENDING, correlationId
     ]

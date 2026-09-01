@@ -31,6 +31,9 @@ import {
 import {
   getControls, setControls, getHealth, assertImportOpen
 } from '../../core/src/services/controls.js';
+import {
+  inspectIntegrity, repairBackorderTotals
+} from '../../core/src/services/integrity.js';
 import { readWorkbook } from '../../import/src/workbook.js';
 import { readFile as readProfileFile } from 'node:fs/promises';
 import {
@@ -384,6 +387,38 @@ route('GET', /^\/api\/project-health$/, async (req, res) => {
   const ctx = await authenticate(req);
   requirePermission(ctx, 'search');
   await withClient(ctx, (c) => getHealth(c, ctx.projectId), res);
+});
+
+// --- integrity -------------------------------------------------------------
+
+/** Read-only. Reports what is inconsistent across rows; changes nothing. */
+route('GET', /^\/api\/integrity$/, async (req, res) => {
+  const ctx = await authenticate(req);
+  requirePermission(ctx, 'ownerEdit');
+  await withClient(ctx, (c) => inspectIntegrity(c, ctx.projectId), res);
+});
+
+/**
+ * Bring line backorder totals back into line with their requests.
+ * The requests are the record of what was asked and decided, so they win.
+ */
+route('POST', /^\/api\/integrity\/repair$/, async (req, res) => {
+  const ctx = await authenticate(req);
+  requirePermission(ctx, 'ownerEdit');
+
+  const body = await readBody(req);
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const result = await repairBackorderTotals({ ...ctx, client }, body);
+    await client.query('COMMIT');
+    json(res, 200, result);
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
 });
 
 route('GET', /^\/api\/health$/, async (_req, res) => {

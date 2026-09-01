@@ -345,9 +345,73 @@ async function renderNotices() {
   `;
 }
 
+// --- integrity -------------------------------------------------------------
+
+/**
+ * Cross-row checks. The schema stops one row going wrong; these catch the
+ * cases only visible across tables — a line's backorder total disagreeing
+ * with the requests behind it, bagged quantities not matching the bags.
+ */
+async function renderIntegrity() {
+  const report = await api('/api/integrity');
+  const broken = report.checks.filter((c) => !c.ok);
+
+  $('view').innerHTML = `
+    <div class="stats">
+      <div class="stat ${report.ok ? '' : 'warn'}">
+        <div class="n">${report.ok ? 'OK' : report.problemCount}</div>
+        <div class="l">${report.ok ? 'All consistent' : 'Rows to look at'}</div></div>
+      <div class="stat"><div class="n">${report.checks.length}</div><div class="l">Checks run</div></div>
+    </div>
+
+    ${broken.some((c) => c.code === 'BACKORDER_LEDGER_MISMATCH') ? `
+      <div class="lockbar on">
+        <h3>Backorder totals disagree with their requests</h3>
+        <p>The requests are the record of what the office was asked and what it
+           decided, so they are treated as correct. This resets the line totals
+           to match them.</p>
+        <div class="row"><button id="repair" class="danger">Reset totals from requests</button></div>
+      </div>` : ''}
+
+    ${report.checks.map((c) => `
+      <div class="check ${c.ok ? '' : 'bad'}">
+        <span class="dot"></span>
+        <span>
+          <span class="name">${esc(c.name)}</span>
+          <div class="detail">${esc(c.detail)}</div>
+          ${c.examples?.length ? `<div class="detail" style="margin-top:6px">
+            ${c.examples.slice(0, 5).map((e) =>
+              `${esc(e.fmr_number ?? '')}${e.line_number ? ` line ${e.line_number}` : ''}`
+            ).join(' &middot; ')}${c.count > 5 ? ` … and ${c.count - 5} more` : ''}
+          </div>` : ''}
+        </span>
+        <span class="n">${c.count}</span>
+      </div>
+    `).join('')}
+
+    <p class="hint" style="text-align:left;padding:14px 0 0">
+      Single-row rules are enforced by the database itself and cannot be broken.
+      These are the checks that span tables.
+    </p>
+  `;
+
+  $('repair')?.addEventListener('click', async () => {
+    try {
+      const result = await api('/api/integrity/repair', {
+        method: 'POST', body: JSON.stringify({})
+      });
+      toast(`Reset ${result.repaired} line${result.repaired === 1 ? '' : 's'}.`);
+      renderIntegrity();
+    } catch (failure) { toast(failure.message); }
+  });
+}
+
 // --- wiring ----------------------------------------------------------------
 
-const VIEWS = { health: renderHealth, correct: renderCorrections, notices: renderNotices };
+const VIEWS = {
+  health: renderHealth, correct: renderCorrections,
+  notices: renderNotices, integrity: renderIntegrity
+};
 
 async function show() {
   $('view').innerHTML = '<p class="hint">Loading…</p>';

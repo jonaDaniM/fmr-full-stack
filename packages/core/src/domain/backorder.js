@@ -113,6 +113,49 @@ export function applyLocationTransitions(state, plan) {
 }
 
 /**
+ * Plan how a new backorder absorbs requests the office returned.
+ *
+ * When the office returns a request, the crew is asked for more information.
+ * Raising the backorder again is how they answer — so the new quantity should
+ * revive the returned request rather than sit beside it as a second one. Two
+ * open requests for the same material would double-count the requirement and
+ * give the office two things to decide instead of one.
+ *
+ * Oldest returned request first. Pure — returns a plan, mutates nothing.
+ */
+export function planReturnedResubmission(requests, quantity) {
+  let budget = Math.max(0, num(quantity));
+  const steps = [];
+  let absorbed = 0;
+
+  if (budget <= 0) return { steps, absorbed, remainder: 0 };
+
+  const returned = [...requests]
+    .filter((r) => r.status === BACKORDER_STATUS.RETURNED && num(r.qty_pending) > 0)
+    .sort((a, b) => new Date(a.reported_at) - new Date(b.reported_at));
+
+  for (const request of returned) {
+    if (budget <= 0) break;
+
+    const outstanding = num(request.qty_pending);
+    const applied = Math.min(outstanding, budget);
+
+    steps.push({
+      requestId: request.id,
+      applied,
+      remainingReturned: outstanding - applied,
+      // Fully answered, so it goes back to the office as a fresh ask.
+      revives: applied >= outstanding
+    });
+
+    budget -= applied;
+    absorbed += applied;
+  }
+
+  return { steps, absorbed, remainder: budget };
+}
+
+/**
  * Plan an admin decision on one request.
  *
  * CONFIRM  the office will supply it: pending -> confirmed.

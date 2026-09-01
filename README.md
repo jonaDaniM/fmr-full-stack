@@ -143,6 +143,18 @@ Health reporting covers only what is specific to this workflow: backorders
 nobody has decided on, notices the crews have not acted on, bags sitting
 unissued. Backups and uptime are the database's job, not the application's.
 
+## Integrity checks
+
+The schema's CHECK constraints stop any single row going wrong, and cannot be
+bypassed. What they cannot see is across rows: whether a line's backorder
+totals match the requests behind them, whether bagged quantities match what the
+bags hold, whether issued totals match the transaction history.
+
+Seven such checks run read-only from the owner screen, each naming the rows it
+found. One repair is offered — resetting line backorder totals from their
+requests, since the requests are the record of what the office was actually
+asked and what it decided.
+
 ## Import
 
 Workbooks are parsed into a staging batch and reviewed before anything becomes
