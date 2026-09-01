@@ -169,9 +169,9 @@ function renderLines(lines) {
     </div>
     <div class="tw tw-sticky"><table>
       <thead><tr>
-        <th class="col-tiny">#</th><th class="col-md">Code</th><th class="col-sm">Size</th>
-        <th class="col-grow">Description</th><th class="num col-sm">Qty</th>
-        <th class="col-sm">UOM</th><th class="col-md">Location</th><th class="col-sm"></th>
+        <th class="w-tiny">#</th><th class="w-md">Code</th><th class="w-sm">Size</th>
+        <th class="w-grow">Description</th><th class="num w-sm">Qty</th>
+        <th class="w-sm">UOM</th><th class="w-md">Location</th><th class="w-sm"></th>
       </tr></thead>
       <tbody>
         ${lines.map((l) => `<tr data-line="${esc(l.id)}" data-number="${esc(l.lineNumber)}">

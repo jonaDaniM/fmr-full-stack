@@ -1,0 +1,367 @@
+/**
+ * FMR on Bootstrap 5.3.
+ *
+ * Bootstrap supplies structure — grid, buttons, cards, tables, forms — and
+ * this file supplies the identity. It works by re-pointing Bootstrap's own
+ * `--bs-*` variables at the tokens in fmr.css rather than overriding its
+ * rules, which is what Bootstrap's own docs recommend and the reason this
+ * stays maintainable: an upgrade changes their rules, not these variables.
+ *
+ * Load order matters and is fixed in every page's <head>:
+ *
+ *   1. bootstrap.min.css   structure and components
+ *   2. fmr.css             the design tokens, both themes
+ *   3. theme.css           this file — the bridge, plus what Bootstrap lacks
+ *
+ * Two things here are not cosmetic and must survive future tidying:
+ *
+ *   - The field screen's 48px controls. Bootstrap's default is 38px. Crews
+ *     operate this in gloves; 38px is a mis-tap that moves material.
+ *   - The dark theme. Bootstrap has `data-bs-theme`, but it does not follow
+ *     the OS on its own. The block at the end wires ours to theirs so a
+ *     viewer who has chosen nothing still gets the right one.
+ */
+
+/* --- the bridge ----------------------------------------------------------- */
+
+:root {
+  /* Colour. Bootstrap composes most of its surfaces from these three. */
+  --bs-body-bg: var(--ground);
+  --bs-body-color: var(--ink);
+  --bs-secondary-color: var(--muted);
+  --bs-tertiary-color: var(--muted);
+  --bs-secondary-bg: var(--sunk);
+  --bs-tertiary-bg: var(--sunk);
+  --bs-emphasis-color: var(--ink);
+  --bs-border-color: var(--rule);
+  --bs-border-color-translucent: var(--rule);
+  --bs-link-color: var(--accent);
+  --bs-link-hover-color: var(--accent);
+  --bs-heading-color: var(--ink);
+
+  /* The accent replaces Bootstrap's blue everywhere it reaches: buttons,
+     focus rings, form controls, active states. */
+  --bs-primary: var(--accent);
+  --bs-primary-rgb: 31, 107, 74;
+  --bs-primary-text-emphasis: var(--accent);
+  --bs-primary-bg-subtle: var(--accent-soft);
+  --bs-primary-border-subtle: var(--accent-line);
+
+  --bs-success: var(--ok);
+  --bs-success-rgb: 31, 107, 74;
+  --bs-success-text-emphasis: var(--ok);
+  --bs-success-bg-subtle: var(--ok-soft);
+
+  --bs-warning: var(--warn);
+  --bs-warning-rgb: 138, 90, 18;
+  --bs-warning-text-emphasis: var(--warn);
+  --bs-warning-bg-subtle: var(--warn-soft);
+  --bs-warning-border-subtle: var(--warn-line);
+
+  --bs-danger: var(--danger);
+  --bs-danger-rgb: 154, 47, 39;
+  --bs-danger-text-emphasis: var(--danger);
+  --bs-danger-bg-subtle: var(--danger-soft);
+  --bs-danger-border-subtle: var(--danger-line);
+
+  /* Type. Bootstrap's stack is replaced wholesale; the display face is
+     applied to headings separately below. */
+  --bs-body-font-family: var(--font-body);
+  --bs-body-font-size: var(--t-md);
+  --bs-body-line-height: 1.55;
+  --bs-font-monospace: var(--font-mono);
+  --bs-headings-font-family: var(--font-display);
+
+  --bs-border-radius: var(--r-md);
+  --bs-border-radius-sm: var(--r-sm);
+  --bs-border-radius-lg: var(--r-lg);
+  --bs-border-radius-xl: var(--r-lg);
+
+  --bs-focus-ring-color: rgba(31, 107, 74, 0.3);
+  --bs-focus-ring-width: 3px;
+}
+
+/* Bootstrap's own dark switch, driven by ours so all three theme states —
+   OS dark, explicit dark, explicit light — resolve the same way. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    --bs-primary-rgb: 92, 179, 137;
+    --bs-success-rgb: 92, 179, 137;
+    --bs-warning-rgb: 220, 168, 95;
+    --bs-danger-rgb: 231, 141, 132;
+    color-scheme: dark;
+  }
+}
+:root[data-theme='dark'] {
+  --bs-primary-rgb: 92, 179, 137;
+  --bs-success-rgb: 92, 179, 137;
+  --bs-warning-rgb: 220, 168, 95;
+  --bs-danger-rgb: 231, 141, 132;
+  color-scheme: dark;
+}
+
+/* --- buttons -------------------------------------------------------------- */
+
+/* The default button: an outlined control on the card surface. Most actions
+   on a line are this — only the likeliest one is primary. */
+.btn {
+  --bs-btn-bg: var(--card);
+  --bs-btn-color: var(--ink);
+  --bs-btn-border-color: var(--rule-2);
+  --bs-btn-hover-bg: var(--sunk);
+  --bs-btn-hover-color: var(--ink);
+  --bs-btn-hover-border-color: var(--accent);
+  --bs-btn-active-bg: var(--sunk);
+  --bs-btn-active-color: var(--ink);
+  --bs-btn-active-border-color: var(--accent);
+  --bs-btn-disabled-bg: var(--card);
+  --bs-btn-disabled-color: var(--muted);
+  --bs-btn-disabled-border-color: var(--rule);
+  --bs-btn-font-family: var(--font-display);
+  --bs-btn-font-weight: 600;
+}
+
+/* Bootstrap's buttons do not read --bs-primary. Each variant carries its own
+   --bs-btn-* set, compiled from Sass at build time, so re-pointing the theme
+   colour alone leaves them blue. These are the variables the .btn rules
+   actually use. */
+.btn-primary {
+  --bs-btn-bg: var(--accent);
+  --bs-btn-border-color: var(--accent);
+  --bs-btn-color: var(--accent-ink);
+  --bs-btn-hover-bg: color-mix(in srgb, var(--accent) 88%, #000);
+  --bs-btn-hover-border-color: color-mix(in srgb, var(--accent) 88%, #000);
+  --bs-btn-hover-color: var(--accent-ink);
+  --bs-btn-active-bg: color-mix(in srgb, var(--accent) 78%, #000);
+  --bs-btn-active-border-color: color-mix(in srgb, var(--accent) 78%, #000);
+  --bs-btn-active-color: var(--accent-ink);
+  --bs-btn-disabled-bg: var(--accent);
+  --bs-btn-disabled-border-color: var(--accent);
+  --bs-btn-disabled-color: var(--accent-ink);
+}
+
+/* Destructive actions never wear the affirmative colour. Rejecting a
+   backorder was once styled as the primary action on its own dialog. */
+.btn-danger {
+  --bs-btn-bg: var(--danger);
+  --bs-btn-border-color: var(--danger);
+  --bs-btn-color: var(--danger-ink);
+  --bs-btn-hover-bg: color-mix(in srgb, var(--danger) 88%, #000);
+  --bs-btn-hover-border-color: color-mix(in srgb, var(--danger) 88%, #000);
+  --bs-btn-hover-color: var(--danger-ink);
+  --bs-btn-active-bg: color-mix(in srgb, var(--danger) 78%, #000);
+  --bs-btn-active-border-color: color-mix(in srgb, var(--danger) 78%, #000);
+  --bs-btn-active-color: var(--danger-ink);
+}
+
+
+/* Quieter still: used where an action is present but secondary to reading. */
+.btn-quiet {
+  --bs-btn-bg: transparent;
+  --bs-btn-border-color: var(--rule);
+  --bs-btn-color: var(--ink-2);
+  --bs-btn-hover-bg: var(--sunk);
+  --bs-btn-hover-border-color: var(--rule-2);
+  --bs-btn-hover-color: var(--ink);
+}
+
+.btn[aria-busy='true'] { cursor: progress; }
+
+/* --- typography ----------------------------------------------------------- */
+
+h1, h2, h3, h4, h5, h6,
+.h1, .h2, .h3, .h4, .h5, .h6 {
+  font-family: var(--font-display);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  text-wrap: balance;
+}
+
+/* Every column of digits lines up: a quantity is read against the one above
+   it, and proportional numerals make that comparison harder than it needs
+   to be. */
+.table td, .table th,
+.num, .stat .n, .fmr-tot dd, .h-qty, .fill-n {
+  font-variant-numeric: tabular-nums;
+}
+
+.num { text-align: right; }
+
+/* Small uppercase labels need the tracking back that uppercasing removes. */
+.label, .stat .l, .qty .l, .form-label {
+  font-family: var(--font-display);
+  font-size: var(--t-xs);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.dim { color: var(--muted); }
+.mono { font-family: var(--font-mono); font-size: 0.92em; }
+
+/* --- surfaces ------------------------------------------------------------- */
+
+/* Cards, tables and form controls each carry their own --bs-* set, the same
+   as buttons. Pointing them at the tokens is what makes the dark theme work
+   without a second set of rules. */
+.card {
+  --bs-card-bg: var(--card);
+  --bs-card-color: var(--ink);
+  --bs-card-border-color: var(--rule);
+  --bs-card-border-radius: var(--r-lg);
+  --bs-card-inner-border-radius: var(--r-lg);
+  --bs-card-cap-bg: transparent;
+  --bs-card-spacer-x: var(--s-4);
+  --bs-card-spacer-y: var(--s-3);
+}
+
+.table {
+  --bs-table-bg: transparent;
+  --bs-table-color: var(--ink);
+  --bs-table-border-color: var(--rule);
+  --bs-table-striped-bg: var(--sunk);
+  --bs-table-striped-color: var(--ink);
+  --bs-table-hover-bg: var(--accent-soft);
+  --bs-table-hover-color: var(--ink);
+  font-size: var(--t-sm);
+}
+.table > thead th {
+  font-family: var(--font-display);
+  font-size: var(--t-xs);
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.form-control, .form-select {
+  background-color: var(--card);
+  color: var(--ink);
+  border-color: var(--rule-2);
+}
+.form-control:focus, .form-select:focus {
+  background-color: var(--card);
+  color: var(--ink);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--bs-focus-ring-color);
+}
+.form-control::placeholder { color: var(--muted); }
+
+/* Bootstrap's modal, carrying the dialog that lib/modal.js builds. */
+.modal-content {
+  --bs-modal-bg: var(--card);
+  --bs-modal-color: var(--ink);
+  --bs-modal-border-color: var(--rule);
+  --bs-modal-border-radius: var(--r-lg);
+}
+
+/* --- gloves --------------------------------------------------------------- */
+
+/* Not cosmetic. The field screen is operated with a gloved thumb on a phone
+   in a warehouse, and Bootstrap's 38px control is a mis-tap that moves
+   material to the wrong place. Everything the crew touches grows. */
+.density-field {
+  --bs-body-font-size: var(--t-lg);
+}
+.density-field .btn,
+.density-field .form-control,
+.density-field .form-select {
+  min-height: 48px;
+  font-size: var(--t-md);
+}
+.density-field .btn { padding-inline: var(--s-4); }
+
+/* --- what Bootstrap does not have ----------------------------------------- */
+
+/* Bootstrap names these card-header / card-footer; the markup here says
+   card-head, and renaming 40 call sites to gain nothing is not worth it. */
+.card-head { padding: var(--s-3) var(--s-4); }
+.card-top { display: flex; align-items: baseline; gap: var(--s-2); flex-wrap: wrap; }
+.card-top .ln { font-family: var(--font-display); font-weight: 700; }
+.card-top .iso { font-size: var(--t-sm); color: var(--muted); }
+.card-top .pill { margin-left: auto; }
+.desc { margin-top: 5px; font-size: var(--t-md); }
+.spec { margin-top: 2px; font-size: var(--t-sm); color: var(--muted); }
+
+/* A row of actions on a card. Bootstrap's .btn-group joins buttons into one
+   segmented control, which reads as "pick one of these" — wrong here, since
+   these are separate actions. They stay separate, wrap when they must, and
+   never stretch to fill a row they happen to land on alone. */
+.acts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-2);
+  padding: var(--s-3) var(--s-4);
+  border-top: 1px solid var(--bs-border-color);
+}
+.acts .btn { flex: 0 1 auto; }
+
+/* History is a reference rather than part of the job, so it is quieter than
+   the actions. It is NOT pushed right with margin-left:auto — that margin
+   absorbs the line's free space and forces the wrap this is avoiding. */
+.acts .act-history {
+  --bs-btn-bg: transparent;
+  --bs-btn-border-color: transparent;
+  --bs-btn-color: var(--muted);
+  --bs-btn-hover-bg: var(--sunk);
+  --bs-btn-hover-border-color: var(--rule);
+  --bs-btn-hover-color: var(--ink);
+}
+
+/* The quantities a crew reads before deciding anything. Four figures across,
+   each labelled, in a strip that survives a 320px screen. */
+.qty {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  border-top: 1px solid var(--bs-border-color);
+}
+.qty > div {
+  padding: var(--s-2) 5px;
+  text-align: center;
+  border-right: 1px solid var(--bs-border-color);
+}
+.qty > div:last-child { border-right: 0; }
+.qty .n {
+  display: block;
+  font-family: var(--font-display);
+  font-size: var(--t-xl);
+  font-weight: 700;
+  line-height: 1.15;
+}
+.qty .l { display: block; margin-top: 2px; }
+.qty .rem .n { color: var(--accent); }
+.qty .bo .n { color: var(--warn); }
+
+@media (max-width: 360px) {
+  .qty { grid-template-columns: repeat(2, 1fr); }
+  .qty > div:nth-child(2n) { border-right: 0; }
+  .qty > div:nth-child(-n + 2) { border-bottom: 1px solid var(--bs-border-color); }
+}
+
+/* Status pills. Bootstrap's .badge is the same idea, but the markup names
+   these by what they mean — a line's status — rather than by their colour,
+   so the mapping lives here and the JS keeps saying `pill-warn`. Built on
+   the subtle background pairs so a status never competes with an action. */
+.pill {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 3px var(--s-2);
+  font-family: var(--font-display);
+  font-size: var(--t-xs); font-weight: 600;
+  letter-spacing: 0.04em; text-transform: uppercase; white-space: nowrap;
+  border-radius: 999px;
+  background: var(--accent-soft); color: var(--accent);
+  border: 1px solid var(--accent-line);
+}
+.pill-warn   { background: var(--warn-soft);   color: var(--warn);   border-color: var(--warn-line); }
+.pill-danger { background: var(--danger-soft); color: var(--danger); border-color: var(--danger-line); }
+.pill-quiet  { background: var(--sunk);        color: var(--muted);  border-color: var(--rule); }
+
+/* Visually hidden, but read aloud. Bootstrap has .visually-hidden; this is
+   the shorter alias the markup already uses. */
+.vh {
+  position: absolute; width: 1px; height: 1px;
+  padding: 0; margin: -1px; overflow: hidden;
+  clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
+}

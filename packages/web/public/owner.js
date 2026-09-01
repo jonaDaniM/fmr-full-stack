@@ -165,9 +165,9 @@ async function renderCorrections() {
     <h3 style="margin:var(--s-5) 0 var(--s-3)">Corrections applied</h3>
     <div class="tw"><table>
       <thead><tr>
-        <th class="col-md">FMR</th><th class="col-tiny">Line</th><th class="col-grow">Material</th>
-        <th class="col-md">Undid</th><th class="col-lg">Reason</th>
-        <th class="col-md">By</th><th class="col-md">When</th>
+        <th class="w-md">FMR</th><th class="w-tiny">Line</th><th class="w-grow">Material</th>
+        <th class="w-md">Undid</th><th class="w-lg">Reason</th>
+        <th class="w-md">By</th><th class="w-md">When</th>
       </tr></thead>
       <tbody>${corrections.map((c) => `<tr>
         <td class="mono">${esc(c.fmrNumber)}</td>
@@ -201,9 +201,9 @@ async function findLines() {
 
     $('found').innerHTML = `<div class="tw"><table>
       <thead><tr>
-        <th class="col-md">FMR</th><th class="col-tiny">Line</th><th class="col-md">Drawing</th>
-        <th class="col-grow">Material</th><th class="num col-sm">Issued</th>
-        <th class="num col-sm">Remaining</th><th class="col-sm"></th>
+        <th class="w-md">FMR</th><th class="w-tiny">Line</th><th class="w-md">Drawing</th>
+        <th class="w-grow">Material</th><th class="num w-sm">Issued</th>
+        <th class="num w-sm">Remaining</th><th class="w-sm"></th>
       </tr></thead>
       <tbody>${results.map((l) => `<tr>
         <td class="mono">${esc(l.fmrNumber)}</td>
@@ -343,8 +343,8 @@ async function renderNotices() {
     </div>
     ${notices.length ? `<div class="tw"><table>
       <thead><tr>
-        <th class="col-md">FMR</th><th class="col-tiny">Line</th><th class="col-grow">Material</th>
-        <th class="col-lg">Notice</th><th class="num col-sm">Outstanding</th><th class="col-md">Raised</th>
+        <th class="w-md">FMR</th><th class="w-tiny">Line</th><th class="w-grow">Material</th>
+        <th class="w-lg">Notice</th><th class="num w-sm">Outstanding</th><th class="w-md">Raised</th>
       </tr></thead>
       <tbody>${notices.map((x) => `<tr>
         <td class="mono">${esc(x.fmrNumber)}</td>
@@ -469,9 +469,9 @@ async function renderUsers() {
 
     <div class="tw"><table>
       <thead><tr>
-        <th class="col-lg">Name</th><th class="col-lg">Email</th><th class="col-md">Role</th>
-        <th class="col-grow">Can</th><th class="col-md">Last signed in</th>
-        <th class="col-md">Status</th><th class="col-lg"></th>
+        <th class="w-lg">Name</th><th class="w-lg">Email</th><th class="w-md">Role</th>
+        <th class="w-grow">Can</th><th class="w-md">Last signed in</th>
+        <th class="w-md">Status</th><th class="w-lg"></th>
       </tr></thead>
       <tbody>${members.map((m) => renderMemberRow(m, owners)).join('')}</tbody>
     </table></div>`;
@@ -610,7 +610,7 @@ async function renderLists() {
             <span class="sub">${values.filter((v) => v.active).length} in use</span></h3>
         <div class="tw"><table>
           <thead><tr>
-            <th class="col-grow">Value</th><th class="col-md">Status</th><th class="col-md"></th>
+            <th class="w-grow">Value</th><th class="w-md">Status</th><th class="w-md"></th>
           </tr></thead>
           <tbody>
             ${values.map((v) => `<tr>

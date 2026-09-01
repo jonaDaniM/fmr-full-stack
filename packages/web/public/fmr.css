@@ -167,12 +167,6 @@ a { color: var(--accent); }
 }
 
 /* Visually hidden, still read aloud. */
-.vh {
-  position: absolute; width: 1px; height: 1px;
-  padding: 0; margin: -1px; overflow: hidden;
-  clip-path: inset(50%); white-space: nowrap; border: 0;
-}
-
 .num, .mono { font-variant-numeric: tabular-nums; }
 .dim { color: var(--muted); font-size: var(--t-sm); }
 
@@ -269,34 +263,6 @@ a { color: var(--accent); }
 
 /* --- buttons --------------------------------------------------------------- */
 
-.btn {
-  display: inline-flex; align-items: center; justify-content: center; gap: 7px;
-  min-height: var(--control-h); padding: 0 var(--s-4);
-  font: inherit; font-family: var(--font-display);
-  font-size: var(--t-sm); font-weight: 650;
-  border-radius: var(--r-md); cursor: pointer; white-space: nowrap;
-  background: var(--card); color: var(--ink); border: 1px solid var(--rule-2);
-  transition: background 0.12s ease, border-color 0.12s ease;
-}
-.btn:hover:not(:disabled) { border-color: var(--accent); }
-.btn:disabled { opacity: 0.45; cursor: not-allowed; }
-
-.btn-primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
-.btn-primary:hover:not(:disabled) { filter: brightness(1.08); }
-
-/* Destructive actions never wear the affirmative colour. Rejecting a
-   backorder used to be styled as the primary action on the dialog. */
-.btn-danger { background: var(--danger); color: var(--danger-ink); border-color: var(--danger); }
-.btn-danger:hover:not(:disabled) { filter: brightness(1.08); }
-
-.btn-quiet { background: transparent; border-color: var(--rule); color: var(--ink-2); }
-.btn-quiet:hover:not(:disabled) { background: var(--sunk); border-color: var(--rule-2); }
-
-.btn-sm { min-height: 31px; padding: 0 var(--s-3); font-size: var(--t-xs); }
-.btn-block { width: 100%; }
-
-.btn[aria-busy='true'] { cursor: progress; }
-
 /* --- form fields ----------------------------------------------------------- */
 
 .field { margin-bottom: var(--s-4); }
@@ -317,41 +283,11 @@ a { color: var(--accent); }
 
 /* --- cards ----------------------------------------------------------------- */
 
-.card {
-  background: var(--card);
-  border: 1px solid var(--rule);
-  border-radius: var(--r-lg);
-  box-shadow: var(--shadow-1);
-  overflow: hidden;
-}
-.card + .card { margin-top: var(--s-3); }
-.card-head { padding: var(--s-3) var(--s-4); }
-.card-body { padding: var(--s-4); }
-.card-foot {
-  padding: var(--s-3) var(--s-4);
-  border-top: 1px solid var(--rule);
-  background: var(--sunk);
-  display: flex; gap: var(--s-2); flex-wrap: wrap;
-}
-
 .group { margin-bottom: var(--s-5); }
 .group > h3 { display: flex; align-items: baseline; gap: var(--s-3); margin-bottom: var(--s-2); }
 .group > h3 .sub { font-family: var(--font-body); font-weight: 400; font-size: var(--t-sm); color: var(--muted); }
 
 /* --- pills ----------------------------------------------------------------- */
-
-.pill {
-  display: inline-flex; align-items: center; gap: 5px;
-  font-family: var(--font-display);
-  font-size: var(--t-xs); font-weight: 650; letter-spacing: 0.04em;
-  text-transform: uppercase; white-space: nowrap;
-  padding: 3px 9px; border-radius: var(--r-full);
-  background: var(--ok-soft); color: var(--ok);
-  border: 1px solid transparent;
-}
-.pill-warn { background: var(--warn-soft); color: var(--warn); border-color: var(--warn-line); }
-.pill-danger { background: var(--danger-soft); color: var(--danger); border-color: var(--danger-line); }
-.pill-quiet { background: var(--sunk); color: var(--muted); border-color: var(--rule); }
 
 /* --- stats ----------------------------------------------------------------- */
 
@@ -437,11 +373,11 @@ tbody tr:hover { background: var(--sunk); }
 td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
 
 /* Column widths, so a description stops competing with a quantity for space. */
-.col-tiny { width: 46px; }
-.col-sm { width: 88px; }
-.col-md { width: 128px; }
-.col-lg { width: 190px; }
-.col-grow { width: auto; min-width: 200px; }
+.w-tiny { width: 46px; }
+.w-sm { width: 88px; }
+.w-md { width: 128px; }
+.w-lg { width: 190px; }
+.w-grow { width: auto; min-width: 200px; }
 
 tr.row-bad { background: var(--danger-soft); }
 tr.row-bad:hover { background: var(--danger-soft); filter: brightness(0.98); }
@@ -611,10 +547,13 @@ button.issue:hover { filter: brightness(0.97); }
 
 /* --- field screen ----------------------------------------------------------- */
 
-/* The field screen is designed for a phone held in one hand. On a desk monitor
-   it keeps that column rather than stretching a 48px tap target across two
-   thousand pixels — the layout a crew sees is the layout the office reviews. */
-.searchbar, .list, #hint { width: min(100%, 620px); margin-inline: auto; }
+/* Phone-first, but a desk monitor gets a desk layout: the same cards, laid
+   out in as many columns as fit. A single 620px strip centred on a 2000px
+   screen reads as an unfinished page, and stretching one card that wide turns
+   a 48px tap target into a 400px slab. Neither is the answer — more columns
+   is. The search bar stays a column, because a wider input helps nobody. */
+.searchbar, #hint { width: min(100%, 620px); margin-inline: auto; }
+.list { width: min(100%, 1500px); margin-inline: auto; }
 
 .searchbar { display: flex; gap: var(--s-2); padding: var(--s-3) var(--s-4); }
 .searchbar input {
@@ -728,9 +667,45 @@ button.issue:hover { filter: brightness(0.97); }
 }
 
 /* Inside a group the cards read as one stack, not as separate objects. */
+/* On a phone the cards stack into one continuous sheet under the header. */
 .fmr-group .card { border-radius: 0; border-top: 0; }
 .fmr-group .card + .card { margin-top: 0; }
 .fmr-group .card:last-child { border-radius: 0 0 var(--r-lg) var(--r-lg); }
+
+/* Once two columns fit, the lines become a grid and each card is its own
+   object again — which is why the shared edges are given back here. */
+@media (min-width: 900px) {
+  .fmr-group {
+    display: grid;
+    /* 560px is measured, not chosen by eye: the widest line carries five
+       actions — Confirm found, Issue direct, Bag, Backorder, History — which
+       need 530px plus the card's padding. Below that the last one wraps onto
+       a row of its own. */
+    grid-template-columns: repeat(auto-fill, minmax(560px, 1fr));
+    gap: var(--s-3);
+    align-items: start;
+  }
+  /* The header has room to put identity, totals, fill and filter on one
+     line instead of stacking them. */
+  .fmr-head {
+    grid-column: 1 / -1;
+    grid-template-columns: auto 1fr auto auto;
+    align-items: center;
+    column-gap: var(--s-5);
+    border-radius: var(--r-lg);
+    border-bottom-width: 1px;
+  }
+  .fmr-head .fmr-tot,
+  .fmr-head .fmr-tools { grid-column: auto; margin: 0; }
+  .fmr-head .fmr-tools { min-width: 260px; }
+  .fmr-head .fmr-fill { order: 4; }
+  .fmr-group .card,
+  .fmr-group .card:last-child {
+    border-radius: var(--r-lg);
+    border-top: 1px solid var(--rule-2);
+  }
+  .no-match { grid-column: 1 / -1; border-top: 1px solid var(--rule-2); border-radius: var(--r-lg); }
+}
 
 .card-top { display: flex; align-items: baseline; gap: var(--s-2); flex-wrap: wrap; }
 .card-top .ln {
@@ -782,14 +757,6 @@ button.issue:hover { filter: brightness(0.97); }
   border: 1px solid var(--rule); border-radius: var(--r-full);
   font-variant-numeric: tabular-nums;
 }
-
-.acts {
-  display: flex; flex-wrap: wrap; gap: var(--s-2);
-  padding: var(--s-3) var(--s-4); border-top: 1px solid var(--rule);
-}
-/* Grow to share a row, but never past a width that reads as a button. A lone
-   action on a wide screen used to stretch the full width of the card. */
-.acts .btn { flex: 1 1 auto; min-width: 96px; max-width: 200px; min-height: 44px; }
 
 /* --- import drop zone ------------------------------------------------------- */
 
