@@ -31,7 +31,7 @@ packages/core/
   src/services/    the rules applied to the database, in transactions
   test/            unit tests
 packages/api/      http, auth, idempotency
-packages/web/      field, office, owner and import interfaces
+packages/web/      field, office, owner, drafts and import interfaces
 packages/import/   workbook extraction, profiles, staging
 packages/migrate/  loading the old spreadsheet
 ```
@@ -142,6 +142,58 @@ the reason rather than an error.
 Health reporting covers only what is specific to this workflow: backorders
 nobody has decided on, notices the crews have not acted on, bags sitting
 unissued. Backups and uptime are the database's job, not the application's.
+
+## Drafts
+
+An FMR arrives two ways: parsed out of a workbook, or typed in by hand. Both
+land in the same queue, get corrected in the same screen, and go out through
+the same publish path — where one came from stops mattering once it is waiting.
+
+Saving is lenient and publishing is strict, which is how FMRv3 drew the line
+too: someone typing up a requisition can stop halfway and come back, with the
+gaps recorded against the draft rather than refused. Publishing re-validates
+from stored state, so the button reflects what the server will actually decide
+rather than a stored flag that may be stale.
+
+Lines can be pasted straight from a spreadsheet, tab- or comma-separated, and
+go through the same normalisation as imported ones — a hand-typed `1-1/2` and
+an imported one end up identical.
+
+Archiving takes a draft out of the queue without losing it. Restoring keeps the
+same id, and fails if another draft has taken its FMR number meanwhile. That
+rule is a partial unique index rather than a procedural check, so unlike FMRv3
+it also holds on create.
+
+## Users and lists
+
+Roles are four named permission sets. `ADMIN` is deliberately not a superset of
+`FIELD`: deciding backorders from a desk is a different job from issuing pipe
+in a warehouse.
+
+| Profile | Search | Field | Backorders | Owner |
+|---|---|---|---|---|
+| Read Only | ✓ | | | |
+| Field User | ✓ | ✓ | | |
+| Material Admin | ✓ | | ✓ | |
+| System Owner | ✓ | ✓ | ✓ | ✓ |
+
+A permission set matching none of these reports as `CUSTOM` and is left alone.
+FMRv3's editor silently coerced it to Read Only, so opening such a user and
+saving stripped their access.
+
+Three guards, all enforced in the service rather than the browser: the last
+active owner cannot be demoted or deactivated, nobody can deactivate
+themselves, and deactivating needs a reason. The second is new — FMRv3 had no
+such check, so an owner could lock themselves out.
+
+Deactivation flags a user, never deletes them: their name still has to resolve
+on every transaction they ever performed.
+
+The dropdown lists the crews see — backorder reasons, units, priorities,
+storage locations — are editable from the owner screen. In FMRv3 they could
+only be changed by editing the spreadsheet, so adding a reason meant finding
+someone with access to it. Storage locations stay free text with suggestions,
+since a warehouse invents new ones faster than anyone maintains a list.
 
 ## Integrity checks
 

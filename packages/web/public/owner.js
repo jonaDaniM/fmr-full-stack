@@ -406,11 +406,152 @@ async function renderIntegrity() {
   });
 }
 
+// --- users -----------------------------------------------------------------
+
+async function renderUsers() {
+  const { members, profiles } = await api('/api/admin/members');
+  const active = members.filter((m) => m.active);
+
+  $('view').innerHTML = `
+    <div class="stats">
+      <div class="stat"><div class="n">${active.length}</div><div class="l">Active</div></div>
+      <div class="stat"><div class="n">${active.filter((m) => m.permissions.fieldTransact).length}</div>
+        <div class="l">Can move material</div></div>
+      <div class="stat"><div class="n">${active.filter((m) => m.permissions.ownerEdit).length}</div>
+        <div class="l">Owners</div></div>
+    </div>
+
+    <div class="lockbar">
+      <h3>Add someone to this project</h3>
+      <p>They sign in with the Google account you name here. Changing a role
+         takes effect the next time they load a screen.</p>
+      <div class="row">
+        <input id="email" type="email" placeholder="name@company.com" style="min-width:220px">
+        <input id="name" type="text" placeholder="Full name" style="min-width:160px">
+        <select id="profile" style="font:inherit;padding:9px 12px;border-radius:8px;
+                border:1px solid var(--rule);background:var(--ground);color:var(--ink)">
+          ${profiles.map((p) => `<option value="${p.key}">${esc(p.label)}</option>`).join('')}
+        </select>
+        <button id="add" class="danger" style="background:var(--accent);
+                color:var(--accent-ink);border-color:var(--accent)">Add</button>
+      </div>
+      <p class="hint" style="text-align:left;padding:10px 0 0;font-size:13px">
+        ${profiles.map((p) => `<strong>${esc(p.label)}</strong> — ${esc(p.description)}`).join('<br>')}
+      </p>
+    </div>
+
+    <div class="tw"><table>
+      <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Can</th>
+                 <th>Last signed in</th><th>Status</th><th></th></tr></thead>
+      <tbody>${members.map(renderMemberRow).join('')}</tbody>
+    </table></div>
+  `;
+
+  $('add').onclick = async () => {
+    try {
+      await api('/api/admin/members', {
+        method: 'POST',
+        body: JSON.stringify({
+          email: $('email').value.trim(),
+          name: $('name').value.trim(),
+          profile: $('profile').value
+        })
+      });
+      toast('Added.');
+      renderUsers();
+    } catch (failure) { toast(failure.message); }
+  };
+}
+
+function renderMemberRow(m) {
+  const can = Object.entries({
+    Search: m.permissions.search,
+    Field: m.permissions.fieldTransact,
+    Backorders: m.permissions.adminBackorder,
+    Owner: m.permissions.ownerEdit
+  }).filter(([, on]) => on).map(([label]) => label);
+
+  return `<tr data-user="${m.id}">
+    <td>${esc(m.name)}</td>
+    <td class="dim mono">${esc(m.email)}</td>
+    <td>${esc(m.profile)}${m.profile === 'CUSTOM'
+      ? '<div class="dim">Permissions set by hand</div>' : ''}</td>
+    <td class="dim">${can.join(' · ') || 'nothing'}</td>
+    <td class="dim">${m.lastLoginAt ? when(m.lastLoginAt) : 'never'}</td>
+    <td>${m.active
+      ? '<span class="pill">Active</span>'
+      : `<span class="pill danger">Inactive</span>${m.deactivatedReason
+          ? `<div class="dim">${esc(m.deactivatedReason)}</div>` : ''}`}</td>
+    <td><div class="rowacts">
+      ${m.active
+        ? `<button class="no" data-deactivate="${m.id}">Deactivate</button>`
+        : `<button data-reactivate="${m.id}">Reactivate</button>`}
+    </div></td>
+  </tr>`;
+}
+
+// --- lists -----------------------------------------------------------------
+
+async function renderLists() {
+  const { lists } = await api('/api/admin/lists');
+
+  const LABELS = {
+    BACKORDER_REASON: 'Backorder reasons',
+    UOM: 'Units of measure',
+    PRIORITY: 'Priorities',
+    STORAGE_LOCATION: 'Storage locations'
+  };
+
+  $('view').innerHTML = `
+    <p class="hint" style="text-align:left;padding:0 0 16px">
+      These are the choices the crews see. Retiring a value hides it from new
+      entries; anything already recorded against it keeps it.
+    </p>
+
+    ${Object.entries(LABELS).map(([name, label]) => {
+      const values = lists[name] ?? [];
+      return `<section class="group">
+        <h3><span class="n">${esc(label)}</span>
+            <span class="sub">${values.filter((v) => v.active).length} in use</span></h3>
+        <div class="tw"><table>
+          <thead><tr><th>Value</th><th>Status</th><th></th></tr></thead>
+          <tbody>
+            ${values.map((v) => `<tr>
+              <td>${esc(v.value)}${v.shared ? '<span class="dim"> · all projects</span>' : ''}</td>
+              <td>${v.active ? '<span class="pill">In use</span>'
+                              : '<span class="pill warn">Retired</span>'}</td>
+              <td><div class="rowacts">
+                ${v.shared ? '<span class="dim">—</span>'
+                  : `<button data-list-toggle="${v.id}" data-active="${!v.active}">
+                       ${v.active ? 'Retire' : 'Restore'}</button>`}
+              </div></td>
+            </tr>`).join('')}
+            <tr>
+              <td colspan="3">
+                <div class="row" style="display:flex;gap:8px">
+                  <input data-new-value="${name}" type="text" placeholder="Add a value"
+                         style="flex:1;font:inherit;padding:8px 11px;border-radius:7px;
+                                border:1px solid var(--rule);background:var(--ground);
+                                color:var(--ink)">
+                  <button data-list-add="${name}" style="font:inherit;font-size:13px;
+                          font-weight:600;padding:7px 14px;border-radius:7px;cursor:pointer;
+                          background:var(--accent);color:var(--accent-ink);border:0">Add</button>
+                </div>
+              </td>
+            </tr>
+          </tbody>
+        </table></div>
+      </section>`;
+    }).join('')}
+  `;
+}
+
 // --- wiring ----------------------------------------------------------------
 
 const VIEWS = {
   health: renderHealth, correct: renderCorrections,
-  notices: renderNotices, integrity: renderIntegrity
+  notices: renderNotices, integrity: renderIntegrity,
+  users: renderUsers, lists: renderLists
 };
 
 async function show() {
@@ -430,9 +571,70 @@ document.querySelector('.tabs').onclick = (event) => {
   show();
 };
 
-$('view').addEventListener('click', (event) => {
+$('view').addEventListener('click', async (event) => {
   const history = event.target.closest('button[data-history]');
-  if (history) showHistory(history.dataset.history);
+  if (history) return showHistory(history.dataset.history);
+
+  const deactivate = event.target.closest('button[data-deactivate]');
+  if (deactivate) {
+    const reason = prompt('Why are you deactivating this account?');
+    if (reason === null) return;
+
+    try {
+      await api('/api/admin/members/active', {
+        method: 'POST',
+        body: JSON.stringify({ userId: deactivate.dataset.deactivate, active: false, reason })
+      });
+      toast('Deactivated.');
+      renderUsers();
+    } catch (failure) { toast(failure.message); }
+    return;
+  }
+
+  const reactivate = event.target.closest('button[data-reactivate]');
+  if (reactivate) {
+    try {
+      await api('/api/admin/members/active', {
+        method: 'POST',
+        body: JSON.stringify({ userId: reactivate.dataset.reactivate, active: true })
+      });
+      toast('Reactivated.');
+      renderUsers();
+    } catch (failure) { toast(failure.message); }
+    return;
+  }
+
+  const toggle = event.target.closest('button[data-list-toggle]');
+  if (toggle) {
+    try {
+      await api('/api/admin/lists', {
+        method: 'POST',
+        body: JSON.stringify({
+          id: toggle.dataset.listToggle,
+          setActive: toggle.dataset.active === 'true'
+        })
+      });
+      renderLists();
+    } catch (failure) { toast(failure.message); }
+    return;
+  }
+
+  const add = event.target.closest('button[data-list-add]');
+  if (add) {
+    const listName = add.dataset.listAdd;
+    const input = document.querySelector(`input[data-new-value="${listName}"]`);
+    const value = input?.value.trim();
+    if (!value) return;
+
+    try {
+      await api('/api/admin/lists', {
+        method: 'POST',
+        body: JSON.stringify({ listName, value })
+      });
+      toast('Added.');
+      renderLists();
+    } catch (failure) { toast(failure.message); }
+  }
 });
 
 $('project').onchange = (event) => {

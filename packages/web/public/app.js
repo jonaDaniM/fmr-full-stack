@@ -158,8 +158,11 @@ const NEEDS = {
   BACKORDER_REQUESTED: ['quantity', 'reason']
 };
 
-const REASONS = ['Not in stock', 'Wrong size received', 'Damaged',
-                 'Short shipped', 'Cannot locate'];
+// Filled from /api/bootstrap so the office can add a reason without a deploy.
+// The fallback covers the case where bootstrap has not answered yet.
+let REASONS = ['Not in stock', 'Wrong size received', 'Damaged',
+               'Short shipped', 'Cannot locate'];
+let STORAGE_LOCATIONS = [];
 
 /** The most this action may move, mirroring the rules the server enforces. */
 function ceilingFor(line, action) {
@@ -216,12 +219,23 @@ function openSheet(line, action) {
       issuedToName: 'Issued to',
       bagTagNumber: 'Bag tag number'
     };
-    const prefill = field === 'storageLocation' ? (line.storageLocation ?? '') : '';
-    const optional = field === 'storageLocation' && action === 'DIRECT_ISSUE';
+    const isLocation = field === 'storageLocation';
+    const prefill = isLocation ? (line.storageLocation ?? '') : '';
+    const optional = isLocation && action === 'DIRECT_ISSUE';
+
+    // Locations are free text with suggestions: a warehouse invents new ones
+    // faster than anyone maintains a list.
+    const suggestions = isLocation && STORAGE_LOCATIONS.length
+      ? `<datalist id="locations">${STORAGE_LOCATIONS
+          .map((l) => `<option value="${esc(l)}">`).join('')}</datalist>`
+      : '';
 
     return `<div class="field">
       <label for="f-${field}">${labels[field]}${optional ? ' (optional)' : ''}</label>
-      <input id="f-${field}" type="text" value="${esc(prefill)}" ${optional ? '' : 'required'}>
+      <input id="f-${field}" type="text" value="${esc(prefill)}"
+             ${isLocation && suggestions ? 'list="locations"' : ''}
+             ${optional ? '' : 'required'}>
+      ${suggestions}
     </div>`;
   }).join('');
 
@@ -354,8 +368,36 @@ async function start() {
     $('project').innerHTML = projects
       .map((p) => `<option value="${p.projectId}"${p.projectId === state.projectId ? ' selected' : ''}>${esc(p.name)}</option>`)
       .join('');
+
+    await loadOptions();
   } catch {
     $('hint').textContent = 'Please sign in to continue.';
+  }
+}
+
+/**
+ * Dropdown values, and whether the project is paused.
+ *
+ * Failing here is not fatal — the built-in reasons still work — so a slow
+ * connection does not stop a crew recording material.
+ */
+async function loadOptions() {
+  try {
+    const bootstrap = await api('/api/bootstrap');
+
+    if (bootstrap.options?.backorderReasons?.length) {
+      REASONS = bootstrap.options.backorderReasons;
+    }
+    STORAGE_LOCATIONS = bootstrap.options?.storageLocations ?? [];
+
+    if (bootstrap.controls?.fieldLocked) {
+      $('hint').textContent = bootstrap.controls.lockReason
+        ? `Material movement is paused: ${bootstrap.controls.lockReason}`
+        : 'Material movement is paused on this project.';
+      $('hint').hidden = false;
+    }
+  } catch {
+    // Keep the defaults.
   }
 }
 

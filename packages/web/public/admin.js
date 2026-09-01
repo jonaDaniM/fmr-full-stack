@@ -217,10 +217,10 @@ async function renderRegister() {
         <th>FMR</th><th>IWP</th><th>Requested by</th><th>Needed</th>
         <th>Priority</th><th class="num">Lines</th>
         <th class="num">Requested</th><th class="num">Issued</th>
-        <th class="num">Remaining</th><th>Progress</th>
+        <th class="num">Remaining</th><th>Progress</th><th></th>
       </tr></thead>
       <tbody>${fmrs.map((f) => `
-        <tr>
+        <tr data-fmr="${f.id}" data-number="${esc(f.fmrNumber)}">
           <td class="mono"><strong>${esc(f.fmrNumber)}</strong></td>
           <td class="mono dim">${esc(f.iwpNumber ?? '—')}</td>
           <td>${esc(f.requestedBy ?? '')}</td>
@@ -231,10 +231,78 @@ async function renderRegister() {
           <td class="num">${n(f.qtyIssued)}</td>
           <td class="num">${n(f.qtyRemaining)}</td>
           <td><div class="bar" title="${f.fulfillmentPct}%"><i style="width:${f.fulfillmentPct}%"></i></div></td>
+          <td><div class="rowacts"><button data-renumber="${f.id}">Renumber</button></div></td>
         </tr>`).join('')}
       </tbody>
     </table></div>
   `;
+}
+
+// --- renumber --------------------------------------------------------------
+
+/**
+ * Rename a published FMR.
+ *
+ * Material Management does reassign official numbers after issue. Everything
+ * already recorded against the FMR follows it — the number is stored once.
+ */
+function openRenumber(fmrId, currentNumber) {
+  const backdrop = document.createElement('div');
+  backdrop.className = 'sheet-bg';
+  backdrop.innerHTML = `<div class="sheet" role="dialog" aria-modal="true" aria-label="Renumber FMR">
+    <h2>Renumber ${esc(currentNumber)}</h2>
+    <div class="for">Everything recorded against this FMR keeps its history and
+      follows the new number.</div>
+    <div class="err" id="err" hidden></div>
+    <form id="form">
+      <div class="field">
+        <label for="newNumber">New FMR number</label>
+        <input id="newNumber" type="text" required placeholder="FMR-2026-0418">
+      </div>
+      <div class="field">
+        <label for="why">Why is it changing?</label>
+        <input id="why" type="text" required placeholder="e.g. reissued by Material Management">
+      </div>
+      <div class="sheet-acts">
+        <button type="button" id="cancel">Cancel</button>
+        <button type="submit" class="primary" id="go">Renumber</button>
+      </div>
+    </form>
+  </div>`;
+
+  document.body.appendChild(backdrop);
+  $('newNumber').focus();
+
+  const close = () => backdrop.remove();
+  $('cancel').onclick = close;
+  backdrop.onclick = (e) => { if (e.target === backdrop) close(); };
+
+  $('form').onsubmit = async (event) => {
+    event.preventDefault();
+    const button = $('go');
+    button.disabled = true;
+    button.textContent = 'Working…';
+
+    try {
+      const result = await api('/api/fmr/renumber', {
+        method: 'POST',
+        headers: { 'idempotency-key': crypto.randomUUID() },
+        body: JSON.stringify({
+          fmrId,
+          newNumber: $('newNumber').value.trim(),
+          reason: $('why').value.trim()
+        })
+      });
+      close();
+      toast(`${result.from} is now ${result.to}.`);
+      show();
+    } catch (failure) {
+      $('err').textContent = failure.message;
+      $('err').hidden = false;
+      button.disabled = false;
+      button.textContent = 'Renumber';
+    }
+  };
 }
 
 // --- by drawing ------------------------------------------------------------
@@ -295,6 +363,12 @@ $('view').addEventListener('click', (event) => {
   if (filter) {
     state.filter = filter.dataset.filter;
     return show();
+  }
+
+  const renumber = event.target.closest('button[data-renumber]');
+  if (renumber) {
+    const row = renumber.closest('tr');
+    return openRenumber(renumber.dataset.renumber, row.dataset.number);
   }
 
   const decide = event.target.closest('button[data-decide]');

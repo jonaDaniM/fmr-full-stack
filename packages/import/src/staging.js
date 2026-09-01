@@ -46,10 +46,10 @@ export async function stageWorkbook(ctx, { sheets, sourceName, profile, profileN
 
       const { rows: itemRows } = await client.query(
         `INSERT INTO import_items
-           (batch_id, sheet_name, fmr_number, iwp_number, iso_number, iso_sheet,
-            requested_by, date_required, priority, header_json, line_count,
-            status, selected, existing_fmr_id)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+           (batch_id, project_id, sheet_name, fmr_number, iwp_number, iso_number,
+            iso_sheet, requested_by, date_required, priority, header_json,
+            line_count, status, selected, existing_fmr_id)
+         VALUES ($1,$15,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
          RETURNING id`,
         [
           batchId, sheet.sheetName, sheet.header.fmrNumber ?? null,
@@ -59,7 +59,8 @@ export async function stageWorkbook(ctx, { sheets, sourceName, profile, profileN
           sheet.header, sheet.lines.length,
           hasErrors ? 'Blocked' : existingFmrId ? 'Duplicate' : 'Ready',
           !hasErrors && !existingFmrId,
-          existingFmrId
+          existingFmrId,
+          projectId
         ]
       );
       const itemId = itemRows[0].id;
@@ -215,6 +216,21 @@ export async function publishBatch(ctx, { batchId, itemIds }) {
   const { user, projectId } = ctx;
 
   return withTransaction(async (client) => {
+    // An archived batch was deliberately taken out of the queue. Publishing it
+    // from a stale screen would put material in front of the crews that
+    // somebody had decided against.
+    const { rows: batches } = await client.query(
+      `SELECT archived, published_at FROM import_batches
+        WHERE id = $1 AND project_id = $2`,
+      [batchId, projectId]
+    );
+    if (!batches[0]) throw new LedgerError('That batch was not found.', 'NOT_FOUND');
+    if (batches[0].archived) {
+      throw new LedgerError(
+        'This draft is archived. Restore it before publishing.', 'ARCHIVED'
+      );
+    }
+
     const { rows: blocking } = await client.query(
       `SELECT count(*) AS n FROM import_issues
         WHERE batch_id = $1 AND severity = 'error' AND NOT resolved`,

@@ -81,10 +81,10 @@ async function seed() {
     const owner = userIds['jonathan@example.com'];
     const rita = userIds['warehouse@example.com'];
 
+    // Backorder reasons, UOMs and priorities come from migration 005 as
+    // shared values that apply to every project. Only what is specific to this
+    // site belongs here.
     for (const [name, values] of Object.entries({
-      BACKORDER_REASON: ['Not in stock', 'Wrong size received', 'Damaged',
-                         'Short shipped', 'Cannot locate'],
-      UOM: ['EA', 'FT', 'LB', 'GAL'],
       STORAGE_LOCATION: ['Yard A', 'Yard B', 'Rack 12', 'Conex 4', 'Laydown East']
     })) {
       for (const [i, value] of values.entries()) {

@@ -34,6 +34,15 @@ import {
 import {
   inspectIntegrity, repairBackorderTotals
 } from '../../core/src/services/integrity.js';
+import {
+  createDraft, updateDraftHeader, saveDraftLine, deleteDraftLine,
+  archiveDraft, restoreDraft, listDrafts, checkDraftForPublish
+} from '../../import/src/drafts.js';
+import {
+  listMembers, saveMember, setMemberActive,
+  listValues, saveListValue, setListValueActive, renumberFmr
+} from '../../core/src/services/admin.js';
+import { getBootstrap } from '../../core/src/services/bootstrap.js';
 import { readWorkbook } from '../../import/src/workbook.js';
 import { readFile as readProfileFile } from 'node:fs/promises';
 import {
@@ -387,6 +396,126 @@ route('GET', /^\/api\/project-health$/, async (req, res) => {
   const ctx = await authenticate(req);
   requirePermission(ctx, 'search');
   await withClient(ctx, (c) => getHealth(c, ctx.projectId), res);
+});
+
+// --- drafts ----------------------------------------------------------------
+//
+// A hand-written FMR. Goes through the same review and publish path as an
+// imported one — see packages/import/src/drafts.js.
+
+route('GET', /^\/api\/drafts$/, async (req, res, { url }) => {
+  const ctx = await authenticate(req);
+  requirePermission(ctx, 'ownerEdit');
+  await withClient(ctx, (c) => listDrafts(c, ctx.projectId, {
+    source: url.searchParams.get('source') || undefined,
+    includeArchived: url.searchParams.get('archived') !== 'false'
+  }), res);
+});
+
+route('POST', /^\/api\/drafts$/, async (req, res) => {
+  const ctx = await authenticate(req);
+  requirePermission(ctx, 'ownerEdit');
+
+  const body = await readBody(req);
+  const result = await once(
+    req.headers['idempotency-key'], ctx.user, body,
+    () => createDraft(ctx, body)
+  );
+  json(res, 200, result);
+});
+
+route('POST', /^\/api\/drafts\/header$/, async (req, res) => {
+  const ctx = await authenticate(req);
+  requirePermission(ctx, 'ownerEdit');
+  json(res, 200, await updateDraftHeader(ctx, await readBody(req)));
+});
+
+route('POST', /^\/api\/drafts\/line$/, async (req, res) => {
+  const ctx = await authenticate(req);
+  requirePermission(ctx, 'ownerEdit');
+  json(res, 200, await saveDraftLine(ctx, await readBody(req)));
+});
+
+route('DELETE', /^\/api\/drafts\/line$/, async (req, res) => {
+  const ctx = await authenticate(req);
+  requirePermission(ctx, 'ownerEdit');
+  json(res, 200, await deleteDraftLine(ctx, await readBody(req)));
+});
+
+route('POST', /^\/api\/drafts\/archive$/, async (req, res) => {
+  const ctx = await authenticate(req);
+  requirePermission(ctx, 'ownerEdit');
+
+  const body = await readBody(req);
+  json(res, 200, body.restore
+    ? await restoreDraft(ctx, body)
+    : await archiveDraft(ctx, body));
+});
+
+/** Re-validate the way publishing will, so the button reflects the real rules. */
+route('GET', /^\/api\/drafts\/([0-9a-f-]{36})\/check$/, async (req, res, { match }) => {
+  const ctx = await authenticate(req);
+  requirePermission(ctx, 'ownerEdit');
+  await withClient(ctx, (c) => checkDraftForPublish(c, ctx.projectId, match[1]), res);
+});
+
+// --- bootstrap -------------------------------------------------------------
+
+/** What the field screen needs on start: dropdown values and limits. */
+route('GET', /^\/api\/bootstrap$/, async (req, res) => {
+  const ctx = await authenticate(req);
+  requirePermission(ctx, 'search');
+  await withClient(ctx, (c) => getBootstrap(c, ctx.projectId, ctx), res);
+});
+
+// --- administration --------------------------------------------------------
+
+route('GET', /^\/api\/admin\/members$/, async (req, res) => {
+  const ctx = await authenticate(req);
+  requirePermission(ctx, 'ownerEdit');
+  await withClient(ctx, (c) => listMembers(c, ctx.projectId), res);
+});
+
+route('POST', /^\/api\/admin\/members$/, async (req, res) => {
+  const ctx = await authenticate(req);
+  requirePermission(ctx, 'ownerEdit');
+  json(res, 200, await saveMember(ctx, await readBody(req)));
+});
+
+route('POST', /^\/api\/admin\/members\/active$/, async (req, res) => {
+  const ctx = await authenticate(req);
+  requirePermission(ctx, 'ownerEdit');
+  json(res, 200, await setMemberActive(ctx, await readBody(req)));
+});
+
+route('GET', /^\/api\/admin\/lists$/, async (req, res, { url }) => {
+  const ctx = await authenticate(req);
+  requirePermission(ctx, 'ownerEdit');
+  await withClient(ctx, async (c) => ({
+    lists: await listValues(c, ctx.projectId, url.searchParams.get('name') || undefined)
+  }), res);
+});
+
+route('POST', /^\/api\/admin\/lists$/, async (req, res) => {
+  const ctx = await authenticate(req);
+  requirePermission(ctx, 'ownerEdit');
+
+  const body = await readBody(req);
+  json(res, 200, body.setActive !== undefined
+    ? await setListValueActive(ctx, { id: body.id, active: body.setActive })
+    : await saveListValue(ctx, body));
+});
+
+route('POST', /^\/api\/fmr\/renumber$/, async (req, res) => {
+  const ctx = await authenticate(req);
+  requirePermission(ctx, 'ownerEdit');
+
+  const body = await readBody(req);
+  const result = await once(
+    req.headers['idempotency-key'], ctx.user, body,
+    () => renumberFmr(ctx, body)
+  );
+  json(res, 200, result);
 });
 
 // --- integrity -------------------------------------------------------------
