@@ -121,6 +121,26 @@ came from stops mattering once it is waiting.
   save because a spreadsheet cannot cheaply update a row; the audit log already
   carries the history.
 
+## The takeoff toolkit
+
+`industrial-iso-takeoff-toolkit/` is a separate Python tool that reads drawings
+and produces workbooks. It installs as `iso-takeoff` and its BOM workflow is
+the one that matters here:
+
+```bash
+iso-takeoff bom-fmr-generator --input ./drawings --output fmr.xlsx --iwp IWP-123
+```
+
+It exits 3 and reports `status: blocked_review` when it will not vouch for what
+it read — ambiguous IWP, a page needing OCR, a revision conflict, an uncertain
+cell. That is the same judgement the drafts queue exists to support, so the two
+fit together without either having to change: the toolkit decides what is
+trustworthy, and a person resolves the rest in drafts.
+
+Its `BomItem` carries item, description, size, commodity, quantity, unit,
+status, review_reason, and a source PDF and page — which maps onto
+`import_lines` closely enough that wiring it in is mostly plumbing.
+
 ## XLSX parsing is deliberately not a dependency
 
 The `xlsx` package on npm is unmaintained there and carries unfixed
