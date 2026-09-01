@@ -1,0 +1,60 @@
+/* Drafts — the queue and the line editor. */
+
+.draft {
+  display: flex; align-items: flex-start; gap: var(--s-4);
+  padding: var(--s-3) var(--s-4); margin-bottom: var(--s-2);
+  background: var(--card);
+  border: 1px solid var(--rule);
+  border-radius: var(--r-md);
+}
+.draft.archived { opacity: 0.72; }
+.draft.blocked { border-left: 3px solid var(--danger); }
+
+.draft .who { flex: 1; min-width: 0; }
+.draft .who .num {
+  font-family: var(--font-display); font-weight: 700;
+  font-variant-numeric: tabular-nums; margin-right: var(--s-2);
+}
+.draft .pill { margin-right: 5px; vertical-align: 1px; }
+.draft .meta { font-size: var(--t-sm); color: var(--muted); margin-top: 3px; }
+.draft .acts { display: flex; gap: 5px; flex-wrap: wrap; }
+
+.archived-box { margin-top: var(--s-5); }
+.archived-box summary {
+  cursor: pointer; padding: var(--s-2) 0;
+  font-family: var(--font-display); font-weight: 600; font-size: var(--t-sm);
+}
+.archived-box > p { font-size: var(--t-sm); color: var(--muted); margin-bottom: var(--s-3); }
+
+/* The header form. */
+.form {
+  background: var(--card); border: 1px solid var(--rule);
+  border-radius: var(--r-lg); padding: var(--s-5);
+}
+.form > h3 { margin-bottom: var(--s-4); }
+.form .grid {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(184px, 1fr));
+  gap: var(--s-3) var(--s-4);
+}
+.form .row { display: flex; gap: var(--s-3); margin-top: var(--s-5); }
+
+#paste {
+  width: 100%; font: 13px/1.6 var(--font-mono);
+  padding: var(--s-3); resize: vertical;
+  background: var(--sunk); color: var(--ink);
+  border: 1px solid var(--rule-2); border-radius: var(--r-md);
+}
+/* What the paste box parsed, shown before anything is sent. */
+.paste-count {
+  margin-top: var(--s-2); font-size: var(--t-sm); color: var(--muted);
+}
+.paste-count strong { color: var(--ink); font-variant-numeric: tabular-nums; }
+
+.lines-head {
+  display: flex; align-items: baseline; gap: var(--s-3);
+  margin: var(--s-5) 0 var(--s-3);
+}
+.lines-head .sub { font-size: var(--t-sm); color: var(--muted); }
+
+tr[data-line='new'] td { background: var(--sunk); }
+tr[data-line='new'] td:first-child { color: var(--muted); }

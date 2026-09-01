@@ -1,0 +1,56 @@
+/* Sign in — the one page seen before anything else works.
+   Lives outside fmr.css because nothing else uses it. */
+
+body { display: grid; place-items: center; min-height: 100dvh; padding: var(--s-4); }
+
+.signin {
+  width: 100%; max-width: 420px;
+  padding: var(--s-6) var(--s-5) var(--s-5);
+  background: var(--card);
+  border: 1px solid var(--rule);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-2);
+}
+
+/* A pipe run in section: four marks, one filled. The subject, stated quietly. */
+.signin-mark {
+  display: flex; gap: 5px; margin-bottom: var(--s-5);
+}
+.signin-mark::before,
+.signin-mark::after {
+  content: ''; height: 5px; border-radius: 3px;
+}
+.signin-mark::before { width: 34px; background: var(--accent); }
+.signin-mark::after { width: 13px; background: var(--rule-2); }
+
+.signin h1 { font-size: var(--t-2xl); letter-spacing: -0.03em; }
+.signin-sub { color: var(--muted); font-size: var(--t-sm); margin-bottom: var(--s-5); }
+
+.who {
+  display: flex; align-items: center; gap: var(--s-3); width: 100%;
+  margin-bottom: var(--s-2); padding: var(--s-3) var(--s-4);
+  font: inherit; text-align: left; cursor: pointer;
+  background: var(--sunk); color: var(--ink);
+  border: 1px solid var(--rule); border-radius: var(--r-md);
+  transition: border-color 0.12s ease;
+}
+.who:hover:not(:disabled), .who:focus-visible { border-color: var(--accent); }
+.who:disabled { opacity: 0.55; cursor: progress; }
+.who .name { font-weight: 600; display: block; }
+.who .mail { display: block; font-size: var(--t-xs); color: var(--muted); }
+.who .role {
+  margin-left: auto;
+  font-family: var(--font-display); font-size: var(--t-xs); font-weight: 650;
+  letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted);
+  white-space: nowrap;
+}
+
+.signin-note {
+  margin: var(--s-4) 0 0; padding-top: var(--s-4);
+  border-top: 1px solid var(--rule);
+  font-size: var(--t-sm); color: var(--muted);
+}
+.signin-note:empty { display: none; }
+.signin-note.bad { color: var(--danger); }
+
+#gbutton { display: flex; justify-content: center; min-height: 44px; }

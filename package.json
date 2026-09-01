@@ -6,11 +6,12 @@
     "packages/*"
   ],
   "scripts": {
-    "test": "node --test packages/core/test/*.test.js",
+    "test": "node scripts/check-ui.js && node --test packages/core/test/*.test.js",
     "migrate": "node packages/core/src/db/migrate.js",
     "api": "node packages/api/src/server.js",
     "start": "./start-local.sh",
-    "start:reset": "./start-local.sh --reset"
+    "start:reset": "./start-local.sh --reset",
+    "check:ui": "node scripts/check-ui.js"
   },
   "dependencies": {
     "pg": "^8.23.0"

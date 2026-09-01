@@ -10,6 +10,8 @@
  * lists (FieldMetadataService.gs).
  */
 
+import { BACKORDER_STATUS } from '../domain/backorder.js';
+
 const LIMITS = Object.freeze({
   storageLocation: 100,
   notes: 500,
@@ -67,7 +69,11 @@ export async function getBootstrap(client, projectId, ctx) {
       backorderReasons: lists.BACKORDER_REASON ?? [],
       uoms: lists.UOM ?? [],
       priorities: lists.PRIORITY ?? [],
-      storageLocations: locations
+      storageLocations: locations,
+      // Not an editable list — these are the states the domain defines. Served
+      // so the office filter bar reads them from one place instead of keeping
+      // its own copy, which would quietly stop matching if one were renamed.
+      backorderStatuses: Object.values(BACKORDER_STATUS)
     },
     policy: {
       // Suggestions, not a constraint: a crew can type a location nobody

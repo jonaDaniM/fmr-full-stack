@@ -3,25 +3,34 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>FMR Office</title>
-<link rel="stylesheet" href="/app.css">
-<link rel="stylesheet" href="/admin.css">
+<meta name="color-scheme" content="light dark">
+<title>FMR — Office</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="/fmr.css">
 </head>
 <body>
-<header class="topbar">
-  <span class="brand">FMR Office</span>
-  <nav class="tabs">
-    <button data-tab="queue" class="on">Backorders</button>
-    <button data-tab="register">Register</button>
-    <button data-tab="iso">By drawing</button>
-  </nav>
-  <span class="project">
-    <select id="project" aria-label="Project"></select>
-  </span>
-</header>
 
-<main id="view"><p class="hint">Loading…</p></main>
+<header class="topbar"></header>
 
-<script src="/admin.js"></script>
+<main class="page">
+  <div class="page-head">
+    <div>
+      <h1>Office</h1>
+      <p class="lede">Decide backorders, read the register, see progress by drawing.</p>
+    </div>
+  </div>
+
+  <div class="tabs" role="tablist" id="tabs">
+    <button type="button" role="tab" data-tab="queue" aria-selected="true">Backorders</button>
+    <button type="button" role="tab" data-tab="register" aria-selected="false">Register</button>
+    <button type="button" role="tab" data-tab="iso" aria-selected="false">By drawing</button>
+  </div>
+
+  <div id="view"></div>
+</main>
+
+<script type="module" src="/admin.js"></script>
 </body>
 </html>

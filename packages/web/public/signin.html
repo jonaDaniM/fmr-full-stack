@@ -2,95 +2,32 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
 <title>FMR — Sign in</title>
-<link rel="stylesheet" href="/app.css">
-<style>
-  body { display: grid; place-items: center; min-height: 100vh; padding: 20px; }
-  .box {
-    background: var(--card); border: 1px solid var(--rule);
-    border-radius: 14px; padding: 28px; width: 100%; max-width: 420px;
-  }
-  .box h1 { margin: 0 0 4px; font-size: 22px; }
-  .box .sub { color: var(--muted); font-size: 14px; margin-bottom: 22px; }
-  .who {
-    display: flex; align-items: center; gap: 12px; width: 100%;
-    background: var(--ground); border: 1px solid var(--rule);
-    border-radius: 10px; padding: 12px 14px; margin-bottom: 8px;
-    font: inherit; text-align: left; cursor: pointer; color: var(--ink);
-  }
-  .who:hover { border-color: var(--accent); }
-  .who .name { font-weight: 600; }
-  .who .role { margin-left: auto; font-size: 12px; color: var(--muted); }
-  .who .mail { display: block; font-size: 12.5px; color: var(--muted); }
-  .note {
-    margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--rule);
-    font-size: 13px; color: var(--muted);
-  }
-</style>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="/fmr.css">
+<link rel="stylesheet" href="/signin.css">
 </head>
 <body>
-<div class="box">
+
+<main class="signin">
+  <div class="signin-mark" aria-hidden="true"></div>
+
   <h1>FMR</h1>
-  <div class="sub">Field material requisition tracking</div>
-  <div id="who"><p class="hint">Loading…</p></div>
-  <div class="note" id="note"></div>
-</div>
+  <p class="signin-sub">Field material requisition tracking</p>
 
-<script>
-const $ = (id) => document.getElementById(id);
-const esc = (s) => String(s ?? '').replace(/[&<>"']/g,
-  (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  <div id="who">
+    <div class="skel skel-row"></div>
+    <div class="skel skel-row"></div>
+    <div class="skel skel-row"></div>
+  </div>
 
-async function start() {
-  // Already signed in?
-  try {
-    const me = await fetch('/api/me').then((r) => r.ok ? r.json() : null);
-    if (me) return (location.href = '/home.html');
-  } catch { /* not signed in */ }
+  <p class="signin-note" id="note"></p>
+</main>
 
-  const dev = await fetch('/api/auth/dev').then((r) => r.json()).catch(() => ({ enabled: false }));
-
-  if (!dev.enabled) {
-    $('who').innerHTML = `<p class="hint">Sign in with your Google account.</p>`;
-    $('note').textContent =
-      'Google sign-in has not been configured on this server yet.';
-    return;
-  }
-
-  $('who').innerHTML = dev.users.map((u) => `
-    <button class="who" data-email="${esc(u.email)}">
-      <span>
-        <span class="name">${esc(u.name)}</span>
-        <span class="mail">${esc(u.email)}</span>
-      </span>
-      <span class="role">${esc(u.role)}</span>
-    </button>`).join('');
-
-  $('note').textContent =
-    'Running locally, so sign in as any seeded user. Live deployments use Google.';
-
-  $('who').onclick = async (event) => {
-    const button = event.target.closest('button[data-email]');
-    if (!button) return;
-
-    button.disabled = true;
-    try {
-      const response = await fetch('/api/auth/dev', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ email: button.dataset.email })
-      });
-      if (!response.ok) throw new Error((await response.json()).error);
-      location.href = '/home.html';
-    } catch (failure) {
-      $('note').textContent = failure.message;
-      button.disabled = false;
-    }
-  };
-}
-
-start();
-</script>
+<script type="module" src="/signin.js"></script>
 </body>
 </html>

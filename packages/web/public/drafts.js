@@ -1,43 +1,21 @@
 /**
- * Draft FMRs.
+ * Drafts.
  *
- * An FMR typed in by hand, sitting where it can be corrected before the crews
- * see it. Imported ones land in the same queue — where an FMR came from stops
- * mattering once it is waiting to be published.
+ * An FMR waiting for someone to say it is right. They arrive three ways —
+ * typed here, uploaded as a workbook, or read out of a drawing — and all three
+ * land in the same queue, because the judgement is the same either way.
+ *
+ * Nothing published from here can be taken back, so publish re-checks with the
+ * server rather than trusting the counts this page was drawn with.
  */
 
-const state = { projectId: null, tab: 'queue', drafts: null, editing: null, options: {} };
+import { api, idempotencyKey } from './lib/api.js';
+import { $, esc, n, day, skeleton } from './lib/dom.js';
+import { dialog, confirmAction, askReason } from './lib/modal.js';
+import { toast, toastError } from './lib/toast.js';
+import { initShell } from './lib/shell.js';
 
-const $ = (id) => document.getElementById(id);
-const esc = (s) => String(s ?? '').replace(/[&<>"']/g,
-  (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const n = (v) => v == null ? '—' : Number(v).toLocaleString(undefined, { maximumFractionDigits: 2 });
-const day = (d) => d ? new Date(d).toLocaleDateString(undefined,
-  { month: 'short', day: 'numeric' }) : '—';
-
-async function api(path, options = {}) {
-  const response = await fetch(path, {
-    ...options,
-    headers: {
-      'content-type': 'application/json',
-      ...(state.projectId ? { 'x-project-id': state.projectId } : {}),
-      ...options.headers
-    }
-  });
-  const body = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(body.error || 'Something went wrong.');
-  return body;
-}
-
-function toast(message) {
-  document.querySelector('.toast')?.remove();
-  const el = document.createElement('div');
-  el.className = 'toast';
-  el.setAttribute('role', 'status');
-  el.textContent = message;
-  document.body.appendChild(el);
-  setTimeout(() => el.remove(), 3600);
-}
+const state = { tab: 'queue', drafts: null, editing: null, options: {} };
 
 // --- the queue -------------------------------------------------------------
 
@@ -45,46 +23,46 @@ async function renderQueue() {
   const drafts = await api('/api/drafts');
   state.drafts = drafts;
 
+  const withErrors = drafts.active.filter((d) => d.errorCount).length;
+
   $('view').innerHTML = `
     <div class="stats">
-      <div class="stat"><div class="n">${drafts.active.length}</div><div class="l">Waiting</div></div>
-      <div class="stat ${drafts.active.some((d) => d.errorCount) ? 'warn' : ''}">
-        <div class="n">${drafts.active.filter((d) => d.errorCount).length}</div>
-        <div class="l">With errors</div></div>
-      <div class="stat"><div class="n">${drafts.archived.length}</div><div class="l">Archived</div></div>
+      <div class="stat"><span class="n">${drafts.active.length}</span><span class="l">Waiting</span></div>
+      <div class="stat ${withErrors ? 'stat-danger' : ''}">
+        <span class="n">${withErrors}</span><span class="l">With errors</span></div>
+      <div class="stat"><span class="n">${drafts.archived.length}</span><span class="l">Archived</span></div>
     </div>
 
     ${drafts.active.length
       ? drafts.active.map(renderDraft).join('')
-      : '<p class="hint">Nothing waiting. Use New FMR to start one.</p>'}
+      : `<div class="empty">
+           <h2>Nothing waiting</h2>
+           <p>Every draft has been published or archived. Start one with New FMR,
+              or bring in a workbook or drawing from Import.</p>
+         </div>`}
 
     ${drafts.archived.length ? `
-      <details style="margin-top:24px">
-        <summary style="cursor:pointer;font-weight:600;padding:8px 0">
-          Archived (${drafts.archived.length})
-        </summary>
-        <p class="hint" style="text-align:left;padding:6px 0 12px">
-          Archived drafts keep their id and their history. Restoring one puts it
-          back in the queue.
-        </p>
+      <details class="archived-box">
+        <summary>Archived (${drafts.archived.length})</summary>
+        <p>Archived drafts keep their id and their history. Restoring one puts it
+           back in the queue.</p>
         ${drafts.archived.map(renderDraft).join('')}
-      </details>` : ''}
-  `;
+      </details>` : ''}`;
 }
 
 function renderDraft(draft) {
   const blocked = draft.errorCount > 0;
 
-  return `<div class="draft ${draft.archived ? 'archived' : ''}" data-batch="${draft.batchId}"
-             data-item="${draft.itemId}">
+  return `<div class="draft ${draft.archived ? 'archived' : ''} ${blocked ? 'blocked' : ''}"
+             data-batch="${esc(draft.batchId)}" data-item="${esc(draft.itemId)}">
     <div class="who">
       <span class="num">${esc(draft.fmrNumber || '(no number yet)')}</span>
-      ${draft.source === 'import' ? '<span class="pill">Imported</span>' : ''}
-      ${draft.isDuplicate ? '<span class="pill warn">Number already published</span>' : ''}
-      ${blocked ? `<span class="pill danger">${draft.errorCount} error${draft.errorCount === 1 ? '' : 's'}</span>` : ''}
+      ${draft.source === 'import' ? '<span class="pill pill-quiet">Imported</span>' : ''}
+      ${draft.isDuplicate ? '<span class="pill pill-warn">Number already published</span>' : ''}
+      ${blocked ? `<span class="pill pill-danger">${draft.errorCount} error${draft.errorCount === 1 ? '' : 's'}</span>` : ''}
       <div class="meta">
         ${esc(draft.isoNumber ?? '')} ${draft.isoSheet ? `sht ${esc(draft.isoSheet)}` : ''}
-        &middot; ${draft.lineCount} line${draft.lineCount === 1 ? '' : 's'}
+        &middot; ${esc(draft.lineCount)} line${draft.lineCount === 1 ? '' : 's'}
         ${draft.iwpNumber ? `&middot; IWP ${esc(draft.iwpNumber)}` : ''}
         ${draft.dateRequired ? `&middot; needed ${day(draft.dateRequired)}` : ''}
         &middot; ${esc(draft.createdBy ?? '')} ${day(draft.createdAt)}
@@ -94,10 +72,12 @@ function renderDraft(draft) {
     </div>
     <div class="acts">
       ${draft.archived
-        ? `<button data-restore="${draft.batchId}">Restore</button>`
-        : `<button data-edit="${draft.itemId}">Edit</button>
-           <button class="ok" data-publish="${draft.batchId}" ${blocked ? 'disabled' : ''}>Publish</button>
-           <button data-archive="${draft.batchId}">Archive</button>`}
+        ? `<button type="button" class="btn btn-sm" data-restore="${esc(draft.batchId)}">Restore</button>`
+        : `<button type="button" class="btn btn-sm" data-edit="${esc(draft.itemId)}">
+             ${blocked ? 'Fix' : 'Edit'}</button>
+           <button type="button" class="btn btn-sm btn-primary" data-publish="${esc(draft.batchId)}"
+                   ${blocked ? 'disabled title="Fix the errors first"' : ''}>Publish</button>
+           <button type="button" class="btn btn-sm" data-archive="${esc(draft.batchId)}">Archive</button>`}
     </div>
   </div>`;
 }
@@ -112,107 +92,183 @@ function renderForm(draft = null) {
     <div class="form">
       <h3>${draft ? `Editing ${esc(h.fmrNumber || 'draft')}` : 'New FMR'}</h3>
       <div class="grid">
-        <div><label for="fmrNumber">FMR number</label>
-          <input id="fmrNumber" value="${esc(h.fmrNumber ?? '')}"
-                 placeholder="FMR-2026-0417"></div>
-        <div><label for="iwpNumber">IWP number</label>
-          <input id="iwpNumber" value="${esc(h.iwpNumber ?? '')}"></div>
-        <div><label for="isoNumber">Drawing</label>
-          <input id="isoNumber" value="${esc(h.isoNumber ?? '')}" placeholder="D-4410"></div>
-        <div><label for="isoSheet">Sheet</label>
-          <input id="isoSheet" value="${esc(h.isoSheet ?? '')}" placeholder="01"></div>
-        <div><label for="requestedBy">Requested by</label>
-          <input id="requestedBy" value="${esc(h.requestedBy ?? '')}"></div>
-        <div><label for="dateRequired">Needed by</label>
-          <input id="dateRequired" type="date" value="${esc(h.dateRequired ?? '')}"></div>
-        <div><label for="priority">Priority</label>
+        ${textField('fmrNumber', 'FMR number', h.fmrNumber, 'FMR-2026-0417')}
+        ${textField('iwpNumber', 'IWP number', h.iwpNumber)}
+        ${textField('isoNumber', 'Drawing', h.isoNumber, 'D-4410')}
+        ${textField('isoSheet', 'Sheet', h.isoSheet, '01')}
+        ${textField('requestedBy', 'Requested by', h.requestedBy)}
+        <div class="field">
+          <label for="dateRequired">Needed by</label>
+          <input id="dateRequired" type="date" value="${esc(h.dateRequired ?? '')}">
+        </div>
+        <div class="field">
+          <label for="priority">Priority</label>
           <select id="priority">
             <option value="">—</option>
             ${priorities.map((p) =>
               `<option ${p === h.priority ? 'selected' : ''}>${esc(p)}</option>`).join('')}
-          </select></div>
+          </select>
+        </div>
       </div>
 
       ${draft ? '' : `
-        <label for="paste" style="display:block;font-size:12px;font-weight:700;
-               text-transform:uppercase;letter-spacing:0.05em;color:var(--muted);
-               margin:16px 0 5px">Material lines</label>
-        <textarea id="paste" rows="10" placeholder="Paste from a spreadsheet, or type one line each:
+        <div class="field" style="margin-top:var(--s-4)">
+          <label for="paste">Material lines</label>
+          <textarea id="paste" rows="10" placeholder="Paste from a spreadsheet, or type one line each:
 
 Commodity code | Size | Description | Qty | UOM | Location
 PF-A106	6&quot;	PIPE, CS A106 GR B	120	FT	Rack 12
 EL90-A234	6&quot;	ELBOW 90 LR, A234 WPB	18	EA	Rack 12"></textarea>
-        <p class="hint" style="text-align:left;padding:6px 0 0;font-size:13px">
-          Tabs or commas both work. Sizes written as fractions, decimals, or
-          mangled into dates by Excel are all read correctly.
-        </p>`}
+          <div class="paste-count" id="pasteCount">
+            Tabs or commas both work. Sizes written as fractions, decimals, or
+            mangled into dates by Excel are all read correctly.
+          </div>
+        </div>`}
 
       <div class="row">
-        <button class="ok" id="save">${draft ? 'Save changes' : 'Create draft'}</button>
-        <button id="cancel">Cancel</button>
+        <button type="button" class="btn btn-primary" id="save">
+          ${draft ? 'Save changes' : 'Create draft'}</button>
+        <button type="button" class="btn btn-quiet" id="cancel">Cancel</button>
       </div>
     </div>
 
-    <div id="issues"></div>
-    <div id="lines">${draft ? renderLines(draft.lines) : ''}</div>
-  `;
+    <div class="issues" id="issues"></div>
+    <div id="lines">${draft ? renderLines(draft.lines) : ''}</div>`;
 
   $('save').onclick = draft ? () => saveHeader(draft) : createDraft;
   $('cancel').onclick = () => { state.editing = null; switchTab('queue'); };
+
+  // Say what the paste box parsed before anything is sent, not after.
+  $('paste')?.addEventListener('input', showPasteCount);
+}
+
+const textField = (id, label, value, placeholder = '') => `
+  <div class="field">
+    <label for="${id}">${esc(label)}</label>
+    <input id="${id}" value="${esc(value ?? '')}"
+           ${placeholder ? `placeholder="${esc(placeholder)}"` : ''}>
+  </div>`;
+
+function showPasteCount() {
+  const lines = parsePaste($('paste').value);
+  const box = $('pasteCount');
+
+  box.innerHTML = lines.length
+    ? `<strong>${lines.length}</strong> line${lines.length === 1 ? '' : 's'} read
+       &middot; first: ${esc(lines[0].description || lines[0].commodityCode || '(blank)')}`
+    : 'Tabs or commas both work. Sizes written as fractions, decimals, or ' +
+      'mangled into dates by Excel are all read correctly.';
 }
 
 function renderLines(lines) {
   return `
-    <h3 style="font-size:15px;margin:22px 0 10px">Lines</h3>
-    <div class="tw"><table>
+    <div class="lines-head">
+      <h3>Lines</h3>
+      <span class="sub">${lines.length} line${lines.length === 1 ? '' : 's'}
+        &middot; edits save when you leave a cell</span>
+    </div>
+    <div class="tw tw-sticky"><table>
       <thead><tr>
-        <th>#</th><th>Code</th><th>Size</th><th>Description</th>
-        <th class="num">Qty</th><th>UOM</th><th>Location</th><th></th>
+        <th class="col-tiny">#</th><th class="col-md">Code</th><th class="col-sm">Size</th>
+        <th class="col-grow">Description</th><th class="num col-sm">Qty</th>
+        <th class="col-sm">UOM</th><th class="col-md">Location</th><th class="col-sm"></th>
       </tr></thead>
       <tbody>
-        ${lines.map((l) => `<tr data-line="${l.id}">
-          <td class="mono">${l.lineNumber}</td>
+        ${lines.map((l) => `<tr data-line="${esc(l.id)}" data-number="${esc(l.lineNumber)}">
+          <td class="num">${esc(l.lineNumber)}</td>
           <td class="mono" contenteditable data-field="commodityCode">${esc(l.commodityCode ?? '')}</td>
           <td class="mono" contenteditable data-field="size">${esc(l.size ?? '')}</td>
           <td contenteditable data-field="description">${esc(l.description ?? '')}</td>
           <td class="num" contenteditable data-field="quantity">${n(l.quantity)}</td>
           <td class="mono" contenteditable data-field="uom">${esc(l.uom ?? '')}</td>
           <td contenteditable data-field="storageLocation">${esc(l.storageLocation ?? '')}</td>
-          <td><div class="rowacts"><button data-drop="${l.id}">Remove</button></div></td>
+          <td><div class="rowacts">
+            <button type="button" class="btn btn-sm" data-drop="${esc(l.id)}">Remove</button>
+          </div></td>
         </tr>`).join('')}
         <tr data-line="new">
-          <td class="dim">+</td>
+          <td>+</td>
           <td class="mono" contenteditable data-field="commodityCode"></td>
           <td class="mono" contenteditable data-field="size"></td>
           <td contenteditable data-field="description"></td>
           <td class="num" contenteditable data-field="quantity"></td>
           <td class="mono" contenteditable data-field="uom"></td>
           <td contenteditable data-field="storageLocation"></td>
-          <td><div class="rowacts"><button data-add>Add</button></div></td>
+          <td><div class="rowacts">
+            <button type="button" class="btn btn-sm" data-add>Add</button>
+          </div></td>
         </tr>
       </tbody>
     </table></div>`;
 }
 
+/**
+ * Which line an issue is about.
+ *
+ * The two paths name it differently: validating a save answers with
+ * `lineNumber`, while reading the draft back gives `sourceRow`, because that
+ * is the column it is stored in. Same number, so accept either.
+ */
+const issueLine = (issue) => issue.lineNumber ?? issue.sourceRow ?? null;
+
+/**
+ * Show what is wrong, attached to where it is wrong.
+ *
+ * The server tags every line issue with the line it is about and every header
+ * issue with its field. Both used to be discarded, so an error on line 37 of a
+ * 40-line draft appeared as text at the top of the page with nothing marking
+ * the row it meant.
+ */
 function renderIssues(issues) {
   const box = $('issues');
   if (!box) return;
 
-  box.innerHTML = issues?.length
-    ? issues.map((i) => `<div class="issue ${esc(i.severity)}">${esc(i.message)}</div>`).join('')
-    : '';
+  // Clear previous marks before applying the current ones.
+  for (const row of document.querySelectorAll('tr.row-bad')) row.classList.remove('row-bad');
+  for (const field of document.querySelectorAll('.field.bad')) field.classList.remove('bad');
+
+  if (!issues?.length) {
+    box.innerHTML = '';
+    return;
+  }
+
+  box.innerHTML = issues.map((issue) => {
+    const line = issueLine(issue);
+
+    if (line != null) {
+      const row = document.querySelector(`tr[data-number="${CSS.escape(String(line))}"]`);
+      row?.classList.add('row-bad');
+    } else if (issue.field) {
+      $(issue.field)?.closest('.field')?.classList.add('bad');
+    }
+
+    // An issue that names a row is a way to reach it, not just a label. The
+    // message already begins "Line N:", so the tag does not repeat it.
+    const tag = line != null ? `<span class="where">Line ${esc(line)}</span>` : '';
+    const text = String(issue.message ?? '').replace(/^Line\s+\d+:\s*/, '');
+    const body = `${tag}<span>${esc(text)}</span>`;
+
+    return line != null
+      ? `<button type="button" class="issue issue-${esc(issue.severity)}"
+                 data-goto="${esc(line)}">${body}</button>`
+      : `<div class="issue issue-${esc(issue.severity)}">${body}</div>`;
+  }).join('');
 }
 
 async function createDraft() {
+  const button = $('save');
   const header = readHeader();
   const lines = parsePaste($('paste').value);
 
-  if (!lines.length) return toast('Add at least one material line.');
+  if (!lines.length) return toastError('Add at least one material line.');
+
+  button.disabled = true;
+  button.textContent = 'Creating…';
 
   try {
     const result = await api('/api/drafts', {
       method: 'POST',
-      headers: { 'idempotency-key': crypto.randomUUID() },
+      headers: { 'idempotency-key': idempotencyKey() },
       body: JSON.stringify({ header, lines })
     });
 
@@ -220,11 +276,17 @@ async function createDraft() {
     state.editing = null;
     switchTab('queue');
   } catch (failure) {
-    toast(failure.message);
+    toastError(failure.message);
+    button.disabled = false;
+    button.textContent = 'Create draft';
   }
 }
 
 async function saveHeader(draft) {
+  const button = $('save');
+  button.disabled = true;
+  button.textContent = 'Saving…';
+
   try {
     const result = await api('/api/drafts/header', {
       method: 'POST',
@@ -233,7 +295,10 @@ async function saveHeader(draft) {
     renderIssues(result.issues);
     toast(result.valid ? 'Saved.' : 'Saved — some details still need fixing.');
   } catch (failure) {
-    toast(failure.message);
+    toastError(failure.message);
+  } finally {
+    button.disabled = false;
+    button.textContent = 'Save changes';
   }
 }
 
@@ -267,11 +332,13 @@ function parsePaste(text) {
   });
 }
 
-async function openDraft(itemId) {
+async function openDraft(itemId, { keepScroll = false } = {}) {
+  const scroll = keepScroll ? window.scrollY : 0;
+
   try {
     const drafts = state.drafts ?? await api('/api/drafts');
     const summary = [...drafts.active, ...drafts.archived].find((d) => d.itemId === itemId);
-    if (!summary) return toast('That draft is no longer in the queue.');
+    if (!summary) return toastError('That draft is no longer in the queue.');
 
     const batch = await api(`/api/import/${summary.batchId}`);
     const item = batch.items[0];
@@ -280,63 +347,96 @@ async function openDraft(itemId) {
     switchTab('new', false);
     renderForm({ itemId, header: item, lines: item.lines });
     renderIssues(item.issues);
+
+    // Adding line 40 of 60 used to return you to the top of the page.
+    if (keepScroll) window.scrollTo({ top: scroll });
   } catch (failure) {
-    toast(failure.message);
+    toastError(failure.message);
   }
 }
 
 // --- actions ---------------------------------------------------------------
 
 async function publish(batchId) {
-  const draft = state.drafts.active.find((d) => d.batchId === batchId);
+  const draft = state.drafts?.active.find((d) => d.batchId === batchId);
+  if (!draft) return toastError('That draft is no longer in the queue.');
 
   // Ask the server what publishing would actually decide, rather than trusting
   // the counts this page was rendered with.
+  let check;
   try {
-    const check = await api(`/api/drafts/${draft.itemId}/check`);
-    if (!check.canPublish) {
-      renderIssues(check.issues);
-      return toast('This FMR is not ready to publish.');
-    }
+    check = await api(`/api/drafts/${draft.itemId}/check`);
   } catch (failure) {
-    return toast(failure.message);
+    return toastError(failure.message);
   }
 
-  if (!confirm(`Publish ${draft.fmrNumber}? The crews will see it immediately.`)) return;
+  if (!check.canPublish) {
+    // The queue has nowhere to put issues, so say why here rather than leaving
+    // the reasons invisible behind a generic refusal.
+    const problems = check.issues.filter((i) => i.severity === 'error');
+    const sure = await confirmAction({
+      title: 'Not ready to publish',
+      lede: draft.fmrNumber || 'This draft',
+      body: `<div class="issues">${problems.map((issue) => `
+        <div class="issue issue-error">
+          ${issueLine(issue) != null ? `<span class="where">Line ${esc(issueLine(issue))}</span>` : ''}
+          <span>${esc(issue.message)}</span>
+        </div>`).join('')}</div>`,
+      confirmLabel: 'Open and fix'
+    });
+    if (sure) openDraft(draft.itemId);
+    return;
+  }
+
+  const sure = await confirmAction({
+    title: `Publish ${draft.fmrNumber}?`,
+    lede: 'The crews will see it immediately and can start pulling material.',
+    body: `<p class="dim">${esc(draft.lineCount)} line${draft.lineCount === 1 ? '' : 's'}
+           on ${esc(draft.isoNumber ?? 'this drawing')}. Publishing cannot be undone —
+           a mistake afterwards has to be corrected on the ledger.</p>`,
+    confirmLabel: 'Publish it'
+  });
+  if (!sure) return;
 
   try {
     const result = await api('/api/import/publish', {
       method: 'POST',
-      headers: { 'idempotency-key': crypto.randomUUID() },
+      headers: { 'idempotency-key': idempotencyKey() },
       body: JSON.stringify({ batchId })
     });
     toast(`Published ${result.count} FMR${result.count === 1 ? '' : 's'}.`);
-    renderQueue();
+    switchTab('queue');
   } catch (failure) {
-    toast(failure.message);
+    toastError(failure.message);
   }
 }
 
 async function archive(batchId, restore = false) {
-  const reason = prompt(restore
-    ? 'Why are you restoring this draft?'
-    : 'Why are you archiving this draft?');
+  const draft = [...(state.drafts?.active ?? []), ...(state.drafts?.archived ?? [])]
+    .find((d) => d.batchId === batchId);
 
-  if (reason === null) return;
-  if (reason.trim().length < 3) return toast('Give a reason of at least 3 characters.');
-
-  try {
-    await api('/api/drafts/archive', {
-      method: 'POST',
-      body: JSON.stringify({ batchId, reason, restore })
-    });
-    toast(restore ? 'Restored to the queue.' : 'Archived.');
-    renderQueue();
-  } catch (failure) {
-    toast(failure.message);
-  }
+  await askReason({
+    title: restore ? 'Restore this draft' : 'Archive this draft',
+    lede: draft?.fmrNumber || 'Draft',
+    label: restore ? 'Why are you restoring it?' : 'Why are you archiving it?',
+    confirmLabel: restore ? 'Restore' : 'Archive',
+    onSubmit: async (reason) => {
+      await api('/api/drafts/archive', {
+        method: 'POST',
+        body: JSON.stringify({ batchId, reason, restore })
+      });
+      toast(restore ? 'Restored to the queue.' : 'Archived.');
+      switchTab('queue');
+    }
+  });
 }
 
+/**
+ * Save one edited row.
+ *
+ * The whole row is sent, not just the cell that changed — the server validates
+ * a line as a unit, and a quantity is only wrong in the context of its UOM.
+ */
 async function saveLine(row, isNew) {
   const line = {};
   for (const cell of row.querySelectorAll('td[contenteditable]')) {
@@ -344,6 +444,9 @@ async function saveLine(row, isNew) {
   }
 
   if (isNew && !line.description && !line.quantity) return;
+
+  const cells = [...row.querySelectorAll('td[contenteditable]')];
+  for (const cell of cells) cell.classList.add('saving');
 
   try {
     const result = await api('/api/drafts/line', {
@@ -353,32 +456,65 @@ async function saveLine(row, isNew) {
         line: isNew ? line : { ...line, id: row.dataset.line }
       })
     });
+
+    for (const cell of cells) {
+      cell.classList.remove('saving');
+      cell.classList.add('saved');
+      setTimeout(() => cell.classList.remove('saved'), 900);
+    }
+
     renderIssues(result.issues);
-    if (isNew) openDraft(state.editing.itemId);
+    if (isNew) openDraft(state.editing.itemId, { keepScroll: true });
   } catch (failure) {
-    toast(failure.message);
+    for (const cell of cells) cell.classList.remove('saving');
+    toastError(failure.message);
   }
 }
 
 // --- wiring ----------------------------------------------------------------
 
-document.querySelector('.tabs').onclick = (event) => {
+$('tabs').onclick = (event) => {
   const button = event.target.closest('button[data-tab]');
   if (button) switchTab(button.dataset.tab);
 };
 
 function switchTab(tab, render = true) {
   state.tab = tab;
-  document.querySelectorAll('.tabs button')
-    .forEach((b) => b.classList.toggle('on', b.dataset.tab === tab));
+  for (const button of $('tabs').querySelectorAll('button')) {
+    button.setAttribute('aria-selected', String(button.dataset.tab === tab));
+  }
 
   if (!render) return;
-  if (tab === 'queue') { state.editing = null; renderQueue(); }
+  if (tab === 'queue') { state.editing = null; show(); }
   else renderForm();
 }
 
-$('view').addEventListener('click', (event) => {
+async function show() {
+  $('view').innerHTML = skeleton({ stats: 3, rows: 5 });
+  try {
+    await renderQueue();
+  } catch (failure) {
+    $('view').innerHTML = `
+      <div class="empty">
+        <h2>Could not load the queue</h2>
+        <p>${esc(failure.message)}</p>
+        <button type="button" class="btn btn-primary" id="retry">Try again</button>
+      </div>`;
+    $('retry').onclick = show;
+  }
+}
+
+$('view').addEventListener('click', async (event) => {
   const target = (name) => event.target.closest(`button[data-${name}]`);
+
+  const goto = target('goto');
+  if (goto) {
+    // Take the reader to the row the issue is about.
+    const row = document.querySelector(`tr[data-number="${CSS.escape(goto.dataset.goto)}"]`);
+    row?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    row?.querySelector('td[contenteditable]')?.focus();
+    return;
+  }
 
   const edit = target('edit');
   if (edit) return openDraft(edit.dataset.edit);
@@ -396,13 +532,27 @@ $('view').addEventListener('click', (event) => {
   if (add) return saveLine(add.closest('tr'), true);
 
   const drop = target('drop');
-  if (drop && confirm('Remove this line?')) {
-    api('/api/drafts/line', {
-      method: 'DELETE',
-      body: JSON.stringify({ lineId: drop.dataset.drop })
-    })
-      .then(() => openDraft(state.editing.itemId))
-      .catch((failure) => toast(failure.message));
+  if (drop) {
+    const row = drop.closest('tr');
+    const description = row.querySelector('[data-field="description"]')?.textContent.trim();
+    const sure = await confirmAction({
+      title: 'Remove this line?',
+      lede: `Line ${row.dataset.number}`,
+      body: `<p>${esc(description || '(no description)')}</p>`,
+      confirmLabel: 'Remove it',
+      danger: true
+    });
+    if (!sure) return;
+
+    try {
+      await api('/api/drafts/line', {
+        method: 'DELETE',
+        body: JSON.stringify({ lineId: drop.dataset.drop })
+      });
+      openDraft(state.editing.itemId, { keepScroll: true });
+    } catch (failure) {
+      toastError(failure.message);
+    }
   }
 });
 
@@ -415,32 +565,37 @@ $('view').addEventListener('focusout', (event) => {
   if (row.dataset.line !== 'new') saveLine(row, false);
 });
 
-$('project').onchange = (event) => {
-  state.projectId = event.target.value;
-  localStorage.setItem('fmr.project', state.projectId);
-  switchTab('queue');
-};
+/** Enter commits the row and moves down, the way a spreadsheet does. */
+$('view').addEventListener('keydown', (event) => {
+  const cell = event.target.closest('td[contenteditable]');
+  if (!cell) return;
 
-async function start() {
-  try {
-    const { projects } = await api('/api/me');
-    const remembered = localStorage.getItem('fmr.project');
-    state.projectId = projects.find((p) => p.projectId === remembered)?.projectId
-      ?? projects[0]?.projectId;
-
-    $('project').innerHTML = projects
-      .map((p) => `<option value="${p.projectId}"${p.projectId === state.projectId ? ' selected' : ''}>${esc(p.name)}</option>`)
-      .join('');
-
-    try {
-      const bootstrap = await api('/api/bootstrap');
-      state.options = bootstrap.options;
-    } catch { /* the form falls back to sensible defaults */ }
-
-    renderQueue();
-  } catch {
-    location.href = '/signin.html';
+  if (event.key === 'Enter') {
+    event.preventDefault();
+    const row = cell.closest('tr');
+    const index = [...row.children].indexOf(cell);
+    const next = row.nextElementSibling;
+    (next ? next.children[index] : null)?.focus();
+    cell.blur();
   }
+
+  if (event.key === 'Escape') {
+    // Leave the cell without committing whatever was half-typed.
+    event.preventDefault();
+    cell.blur();
+  }
+});
+
+async function loadOptions() {
+  try {
+    const bootstrap = await api('/api/bootstrap');
+    state.options = bootstrap.options;
+  } catch { /* the form falls back to sensible defaults */ }
 }
 
-start();
+await initShell({
+  current: 'drafts',
+  onProjectChange: () => { state.editing = null; switchTab('queue'); }
+});
+await loadOptions();
+show();

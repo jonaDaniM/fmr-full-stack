@@ -13,7 +13,7 @@ those backorders. The ledger of who has what is the whole point of the system.
 brew services start postgresql@17   # once
 npm start                           # http://localhost:3000
 npm run start:reset                 # wipe and start fresh
-npm test                            # 159 tests, no database needed
+npm test                            # 173 tests + the web-layer check
 ```
 
 Sign in by picking a seeded user. Jonathan D. is an owner and sees everything.
@@ -25,7 +25,9 @@ packages/core/src/domain/     the rules — pure functions, no database
 packages/core/src/services/   those rules applied in transactions
 packages/core/test/           tests, all against the domain
 packages/api/src/             http, auth, idempotency
-packages/web/public/          five screens, no framework
+packages/web/public/          seven screens, no framework
+packages/web/public/lib/      the shared layer: api, dom, modal, toast, shell
+scripts/check-ui.js           enforces the rules the web layer rests on
 packages/import/              workbook and CSV import, staging, drafts
 packages/extract/             Python: material out of drawing PDFs
 packages/migrate/             loading the old spreadsheet
@@ -50,6 +52,29 @@ the service and the decision in the domain.
 - **Errors people see are `LedgerError`,** which the API answers 422 with the
   message shown verbatim. Write it for a warehouse hand, not a developer.
 - Tests are `node:test`, named as sentences describing the behaviour.
+
+## The web layer
+
+No framework, no build step, no npm packages — `.js` is served as a native ES
+module, so `lib/` is imported directly. One stylesheet, `fmr.css`, holds the
+tokens; per-screen CSS files hold only what one screen needs.
+
+- **Everything shared lives in `lib/`.** There were once five copies of `api`,
+  `toast` and `esc`, and they had already drifted — the toast timing differed,
+  and `n()` returned an em dash on two screens, which was then posted to the
+  server as a quantity. Add to `lib/`; do not copy.
+- **One dialog: `lib/modal.js`.** It traps focus, restores it, and closes on
+  Escape without leaking its listener. `confirmAction` and `askReason` replace
+  `confirm()` and `prompt()` — a reason that the server refuses is kept, not
+  thrown away.
+- **Every value interpolated into HTML goes through `esc()`.** This is the
+  whole XSS defence, and `npm test` fails if one does not.
+- **Confirm in proportion to consequence.** Rejecting a backorder, resetting
+  ledger totals and resuming work all ask first; they used to fire on one click
+  while archiving a draft asked twice.
+- **Guard what the page already knows.** The signed-in user is in `session`, so
+  a self-deactivation is refused before the form, not after.
+- The CSP forbids inline `<script>` and `onclick`. Bind listeners in JS.
 
 ## Things that are easy to get wrong
 

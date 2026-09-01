@@ -1,0 +1,24 @@
+/* Home — the launcher. Only what this account can actually open. */
+
+.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(232px, 1fr)); gap: var(--s-3); }
+
+a.tile {
+  display: block; padding: var(--s-4);
+  text-decoration: none; color: var(--ink);
+  background: var(--card);
+  border: 1px solid var(--rule);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-1);
+  transition: border-color 0.12s ease, transform 0.12s ease;
+}
+a.tile:hover, a.tile:focus-visible { border-color: var(--accent); transform: translateY(-1px); }
+@media (prefers-reduced-motion: reduce) { a.tile:hover, a.tile:focus-visible { transform: none; } }
+
+a.tile .t {
+  font-family: var(--font-display); font-weight: 650; font-size: var(--t-lg);
+  margin-bottom: 5px; display: flex; align-items: center; gap: var(--s-2);
+}
+a.tile .t::before {
+  content: ''; width: 3px; height: 15px; border-radius: 2px; background: var(--accent);
+}
+a.tile .d { font-size: var(--t-sm); color: var(--muted); }

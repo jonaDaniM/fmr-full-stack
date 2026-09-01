@@ -2,90 +2,30 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
 <title>FMR</title>
-<link rel="stylesheet" href="/app.css">
-<style>
-  main { max-width: 760px; margin: 0 auto; padding: 28px 16px 60px; }
-  .greet { margin: 0 0 4px; font-size: 22px; font-weight: 700; }
-  .sub { color: var(--muted); font-size: 14px; margin-bottom: 24px; }
-  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
-  a.card {
-    display: block; text-decoration: none; color: var(--ink);
-    background: var(--card); border: 1px solid var(--rule);
-    border-radius: 12px; padding: 18px;
-  }
-  a.card:hover { border-color: var(--accent); }
-  a.card .t { font-weight: 700; margin-bottom: 4px; }
-  a.card .d { font-size: 13.5px; color: var(--muted); }
-  .out {
-    margin-top: 26px; font: inherit; font-size: 14px; padding: 9px 16px;
-    background: var(--card); color: var(--muted);
-    border: 1px solid var(--rule); border-radius: 9px; cursor: pointer;
-  }
-</style>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="/fmr.css">
+<link rel="stylesheet" href="/home.css">
 </head>
 <body>
-<header class="topbar"><span class="brand">FMR</span></header>
-<main>
-  <div class="greet" id="greet">…</div>
-  <div class="sub" id="sub"></div>
+
+<header class="topbar"></header>
+
+<main class="page page-narrow">
+  <div class="page-head">
+    <div>
+      <h1 id="greet">…</h1>
+      <p class="lede" id="sub"></p>
+    </div>
+  </div>
+
   <div class="cards" id="cards"></div>
-  <button class="out" id="out">Sign out</button>
 </main>
 
-<script>
-const $ = (id) => document.getElementById(id);
-const esc = (s) => String(s ?? '').replace(/[&<>"']/g,
-  (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-
-const SCREENS = [
-  { href: '/', title: 'Field', need: 'search',
-    detail: 'Search for material, confirm what you found, bag it, issue it, raise a backorder.' },
-  { href: '/admin.html', title: 'Office', need: 'adminBackorder',
-    detail: 'Decide backorders, read the FMR register, see progress by drawing.' },
-  { href: '/drafts.html', title: 'Drafts', need: 'ownerEdit',
-    detail: 'Write up an FMR by hand, or review one that came from a drawing.' },
-  { href: '/import.html', title: 'Import', need: 'ownerEdit',
-    detail: 'Bring in a workbook of FMRs and check it before the crews see it.' },
-  { href: '/owner.html', title: 'Owner', need: 'ownerEdit',
-    detail: 'Users, dropdown lists, corrections, and pausing work on a project.' }
-];
-
-async function start() {
-  let me;
-  try {
-    const response = await fetch('/api/me');
-    if (!response.ok) throw new Error('signed out');
-    me = await response.json();
-  } catch {
-    return (location.href = '/signin.html');
-  }
-
-  $('greet').textContent = me.user.name;
-
-  const project = me.projects[0];
-  $('sub').textContent = me.projects.length > 1
-    ? `${me.projects.length} projects — ${me.projects.map((p) => p.name).join(', ')}`
-    : project ? project.name : 'No project access yet.';
-
-  // Only offer what this person can actually do.
-  const can = project?.permissions ?? {};
-  $('cards').innerHTML = SCREENS
-    .filter((s) => can[s.need])
-    .map((s) => `<a class="card" href="${s.href}">
-        <div class="t">${esc(s.title)}</div>
-        <div class="d">${esc(s.detail)}</div>
-      </a>`).join('')
-    || '<p class="hint">Nothing is available to this account yet.</p>';
-
-  $('out').onclick = async () => {
-    await fetch('/api/auth/signout', { method: 'POST' });
-    location.href = '/signin.html';
-  };
-}
-
-start();
-</script>
+<script type="module" src="/home.js"></script>
 </body>
 </html>

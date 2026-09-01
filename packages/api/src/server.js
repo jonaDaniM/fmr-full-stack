@@ -52,9 +52,45 @@ import {
 } from './auth.js';
 import { once, IdempotencyConflict } from './idempotency.js';
 
+/**
+ * Headers on everything this server sends.
+ *
+ * The pages build HTML by concatenation, so escaping is what stands between a
+ * material description and an injected script. `script-src 'self'` is the
+ * second line: even if something slipped through, an inline script would not
+ * run. It also means no page may carry an inline <script> or an onclick
+ * attribute of its own — all behaviour lives in a .js file.
+ *
+ * accounts.google.com is admitted because Google Identity Services renders the
+ * real sign-in button; nothing else off-origin executes.
+ */
+const SECURITY_HEADERS = {
+  'content-security-policy': [
+    "default-src 'self'",
+    "script-src 'self' https://accounts.google.com",
+    // 'unsafe-inline' covers style attributes only — progress bars and
+    // fulfilment bars set their width inline. It does not admit inline
+    // script, which is the direction an injection would need to go.
+    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+    'font-src https://fonts.gstatic.com',
+    "img-src 'self' data:",
+    "connect-src 'self'",
+    'frame-src https://accounts.google.com',
+    // The office screens confirm and reject backorders on a single click, so
+    // they must not be framable.
+    "frame-ancestors 'none'",
+    "base-uri 'none'",
+    "form-action 'self'"
+  ].join('; '),
+  'x-content-type-options': 'nosniff',
+  'referrer-policy': 'same-origin',
+  'cross-origin-opener-policy': 'same-origin-allow-popups'
+};
+
 const json = (res, status, body) => {
   const payload = JSON.stringify(body);
   res.writeHead(status, {
+    ...SECURITY_HEADERS,
     'content-type': 'application/json',
     'content-length': Buffer.byteLength(payload)
   });
@@ -141,10 +177,20 @@ route('POST', /^\/api\/auth\/dev$/, async (req, res) => {
   });
 });
 
-/** Who can be signed in as locally, so the page can offer a list. */
+/**
+ * What sign-in methods this server offers, and who can be signed in as
+ * locally.
+ *
+ * `googleClientId` is a public value by design — Google Identity Services
+ * needs it in the browser to render its button, and it grants nothing on its
+ * own. Without it the sign-in page can say so plainly instead of offering a
+ * button that cannot work.
+ */
 route('GET', /^\/api\/auth\/dev$/, async (_req, res) => {
+  const googleClientId = process.env.GOOGLE_CLIENT_ID ?? null;
+
   if (process.env.FMR_DEV_LOGIN !== '1') {
-    return json(res, 200, { enabled: false, users: [] });
+    return json(res, 200, { enabled: false, users: [], googleClientId });
   }
 
   const { rows } = await pool.query(
@@ -157,6 +203,7 @@ route('GET', /^\/api\/auth\/dev$/, async (_req, res) => {
 
   json(res, 200, {
     enabled: true,
+    googleClientId,
     users: rows.map((r) => ({ email: r.email, name: r.display_name, role: r.role }))
   });
 });
@@ -682,6 +729,7 @@ async function serveStatic(pathname, res) {
   try {
     const body = await readFile(file);
     res.writeHead(200, {
+      ...SECURITY_HEADERS,
       'content-type': MIME[extname(file)] ?? 'application/octet-stream',
       'cache-control': 'no-cache'
     });

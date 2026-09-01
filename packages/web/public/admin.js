@@ -6,42 +6,29 @@
  * one is read at a desk.
  */
 
-const state = { projects: [], projectId: null, tab: 'queue', filter: 'Pending', data: null };
+import { api, idempotencyKey } from './lib/api.js';
+import { $, esc, n, day, skeleton, emptyRow } from './lib/dom.js';
+import { dialog, confirmAction } from './lib/modal.js';
+import { toast, toastError } from './lib/toast.js';
+import { initShell } from './lib/shell.js';
 
-const $ = (id) => document.getElementById(id);
-const esc = (s) => String(s ?? '').replace(/[&<>"']/g,
-  (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const n = (v) => Number(v ?? 0).toLocaleString(undefined, { maximumFractionDigits: 2 });
-const day = (d) => d ? new Date(d).toLocaleDateString(undefined,
-  { month: 'short', day: 'numeric' }) : '—';
-
-async function api(path, options = {}) {
-  const response = await fetch(path, {
-    ...options,
-    headers: {
-      'content-type': 'application/json',
-      ...(state.projectId ? { 'x-project-id': state.projectId } : {}),
-      ...options.headers
-    }
-  });
-  const body = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(body.error || 'Something went wrong.');
-  return body;
-}
-
-function toast(message) {
-  document.querySelector('.toast')?.remove();
-  const el = document.createElement('div');
-  el.className = 'toast';
-  el.setAttribute('role', 'status');
-  el.textContent = message;
-  document.body.appendChild(el);
-  setTimeout(() => el.remove(), 3200);
-}
+const state = { tab: 'queue', filter: 'Pending', data: null, filters: null };
 
 // --- backorder queue -------------------------------------------------------
 
-const FILTERS = ['Pending', 'Confirmed', 'Returned for Review', 'Rejected', 'All'];
+// The statuses a request can be in. Fetched from the domain via /api/bootstrap
+// rather than hardcoded, so renaming one cannot silently empty this queue.
+// Ordered the way an expeditor works: what needs deciding, then what was.
+const FILTER_ORDER = ['Pending', 'Returned for Review', 'Confirmed',
+                      'Partially Confirmed', 'Rejected', 'Fulfilled'];
+const FALLBACK_FILTERS = FILTER_ORDER;
+
+const orderFilters = (statuses) =>
+  [...statuses].sort((a, b) => {
+    const ia = FILTER_ORDER.indexOf(a);
+    const ib = FILTER_ORDER.indexOf(b);
+    return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib);
+  });
 
 async function renderQueue() {
   const status = state.filter === 'All' ? '' : `?status=${encodeURIComponent(state.filter)}`;
@@ -59,43 +46,54 @@ async function renderQueue() {
     confirmed: acc.confirmed + r.qtyConfirmed
   }), { pending: 0, confirmed: 0 });
 
+  const filters = [...(state.filters ?? FALLBACK_FILTERS), 'All'];
+
   $('view').innerHTML = `
     <div class="stats">
-      <div class="stat"><div class="n">${requests.length}</div><div class="l">Requests</div></div>
-      <div class="stat warn"><div class="n">${n(totals.pending)}</div><div class="l">Qty pending</div></div>
-      <div class="stat"><div class="n">${n(totals.confirmed)}</div><div class="l">Qty committed</div></div>
-      <div class="stat"><div class="n">${Object.keys(groups).length}</div><div class="l">FMRs affected</div></div>
+      <div class="stat"><span class="n">${requests.length}</span><span class="l">Requests</span></div>
+      <div class="stat stat-warn"><span class="n">${n(totals.pending)}</span><span class="l">Qty pending</span></div>
+      <div class="stat"><span class="n">${n(totals.confirmed)}</span><span class="l">Qty committed</span></div>
+      <div class="stat"><span class="n">${Object.keys(groups).length}</span><span class="l">FMRs affected</span></div>
     </div>
 
-    <div class="filters">
-      ${FILTERS.map((f) =>
-        `<button data-filter="${esc(f)}" class="${f === state.filter ? 'on' : ''}">${esc(f)}</button>`
+    <div class="filters" role="group" aria-label="Filter by status">
+      ${filters.map((f) =>
+        `<button type="button" data-filter="${esc(f)}"
+                 aria-pressed="${f === state.filter}">${esc(f)}</button>`
       ).join('')}
     </div>
 
     ${Object.entries(groups).map(([fmr, rows]) => `
       <section class="group">
-        <h3><span class="n">${esc(fmr)}</span>
+        <h3><span class="num">${esc(fmr)}</span>
             <span class="sub">${rows.length} line${rows.length === 1 ? '' : 's'}
             &middot; needed ${day(rows[0].dateRequired)}
             ${rows[0].priority ? `&middot; ${esc(rows[0].priority)} priority` : ''}</span></h3>
         <div class="tw"><table>
           <thead><tr>
-            <th>Line</th><th>Drawing</th><th>Material</th>
-            <th class="num">Asked</th><th class="num">Pending</th><th class="num">Committed</th>
-            <th>Reason</th><th>Raised</th><th></th>
+            <th class="col-tiny">Line</th><th class="col-md">Drawing</th><th class="col-grow">Material</th>
+            <th class="num col-sm">Asked</th><th class="num col-sm">Pending</th><th class="num col-sm">Committed</th>
+            <th class="col-lg">Reason</th><th class="col-md">Raised</th><th class="col-lg"></th>
           </tr></thead>
           <tbody>${rows.map(renderQueueRow).join('')}</tbody>
         </table></div>
       </section>
-    `).join('') || '<p class="hint">Nothing in this queue.</p>'}
+    `).join('') || emptyQueue()}
   `;
 }
 
+const emptyQueue = () => `
+  <div class="empty">
+    <h2>Nothing ${state.filter === 'All' ? 'in the queue' : `marked ${esc(state.filter).toLowerCase()}`}</h2>
+    <p>${state.filter === 'Pending'
+      ? 'Every backorder has been decided. The crews are not waiting on the office.'
+      : 'Try another filter to see requests in a different state.'}</p>
+  </div>`;
+
 function renderQueueRow(r) {
   const decidable = r.qtyPending > 0;
-  return `<tr data-request="${r.id}">
-    <td class="mono">${r.lineNumber}</td>
+  return `<tr data-request="${esc(r.id)}">
+    <td class="num">${esc(r.lineNumber)}</td>
     <td class="mono">${esc(r.isoNumber)}<span class="dim"> sht ${esc(r.isoSheet)}</span></td>
     <td>${esc(r.description ?? '')}<div class="dim">${esc(r.commodityCode ?? '')} &middot; ${esc(r.size ?? '')}</div></td>
     <td class="num">${n(r.qtyRequested)}</td>
@@ -105,9 +103,9 @@ function renderQueueRow(r) {
     <td class="dim">${esc(r.reportedByName ?? '')}<br>${day(r.reportedAt)}</td>
     <td><div class="rowacts">
       ${decidable ? `
-        <button class="ok" data-decide="CONFIRM">Confirm</button>
-        <button data-decide="RETURN">Return</button>
-        <button class="no" data-decide="REJECT">Reject</button>
+        <button type="button" class="btn btn-sm btn-primary" data-decide="CONFIRM">Confirm</button>
+        <button type="button" class="btn btn-sm" data-decide="RETURN">Return</button>
+        <button type="button" class="btn btn-sm" data-decide="REJECT">Reject</button>
       ` : `<span class="dim">${esc(r.status)}</span>`}
     </div></td>
   </tr>`;
@@ -124,80 +122,64 @@ const DECISION_COPY = {
              help: 'Send it back for more information. The quantity stays reserved.' }
 };
 
-function openDecision(request, decision) {
+async function decide(request, decision) {
   const copy = DECISION_COPY[decision];
-  const notesRequired = decision === 'RETURN';
+  const destructive = decision === 'REJECT';
 
-  const backdrop = document.createElement('div');
-  backdrop.className = 'sheet-bg';
-  backdrop.innerHTML = `<div class="sheet" role="dialog" aria-modal="true" aria-label="${copy.title}">
-    <h2>${copy.title}</h2>
-    <div class="for">${esc(request.fmrNumber)} &middot; line ${request.lineNumber} &middot;
-      ${esc(request.description ?? '')}</div>
-    <div class="err" id="err" hidden></div>
-    <form id="form">
-      <div class="field">
-        <label for="qty">Quantity</label>
-        <input id="qty" type="number" min="0.0001" max="${request.qtyPending}"
-               step="any" value="${request.qtyPending}" required>
-        <div class="max">${n(request.qtyPending)} pending. Decide less to split the request.</div>
-      </div>
-      <div class="field">
-        <label for="notes">Notes${notesRequired ? '' : ' (optional)'}</label>
-        <textarea id="notes" rows="3" ${notesRequired ? 'required' : ''}
-          placeholder="${notesRequired ? 'What does the crew need to provide?' : ''}"></textarea>
-        <div class="max">${copy.help}</div>
-      </div>
-      <div class="sheet-acts">
-        <button type="button" id="cancel">Cancel</button>
-        <button type="submit" class="primary" id="go">${copy.verb}</button>
-      </div>
-    </form>
-  </div>`;
+  // Rejecting means the crew does not get the material. It used to fire
+  // straight from the row with its submit styled as the affirmative action.
+  if (destructive) {
+    const sure = await confirmAction({
+      title: 'Reject this request?',
+      lede: `${request.fmrNumber} · line ${request.lineNumber}`,
+      body: `<p>${esc(request.description ?? '')}</p>
+             <p class="dim">${n(request.qtyPending)} pending will be released and
+             the crew told it is not coming. They will have to source it another way.</p>`,
+      confirmLabel: 'Yes, reject it',
+      danger: true
+    });
+    if (!sure) return;
+  }
 
-  document.body.appendChild(backdrop);
-  $('qty').focus();
-
-  const close = () => backdrop.remove();
-  $('cancel').onclick = close;
-  backdrop.onclick = (e) => { if (e.target === backdrop) close(); };
-  document.addEventListener('keydown', function onKey(e) {
-    if (e.key === 'Escape') { close(); document.removeEventListener('keydown', onKey); }
-  });
-
-  $('form').onsubmit = async (event) => {
-    event.preventDefault();
-    const button = $('go');
-    const error = $('err');
-
-    button.disabled = true;
-    button.textContent = 'Working…';
-    error.hidden = true;
-
-    try {
+  await dialog({
+    title: copy.title,
+    lede: `${request.fmrNumber} · line ${request.lineNumber} · ${request.description ?? ''}`,
+    confirmLabel: copy.verb,
+    danger: destructive,
+    fields: [
+      {
+        name: 'quantity', label: 'Quantity', type: 'number', required: true,
+        value: request.qtyPending, min: 0.0001, max: request.qtyPending, step: 'any',
+        hint: `${n(request.qtyPending)} pending. Decide less to split the request.`
+      },
+      {
+        name: 'notes',
+        label: `Notes${decision === 'RETURN' ? '' : ' (optional)'}`,
+        type: 'textarea', rows: 3,
+        required: decision === 'RETURN',
+        placeholder: decision === 'RETURN' ? 'What does the crew need to provide?' : '',
+        hint: copy.help
+      }
+    ],
+    onSubmit: async (values) => {
       const result = await api('/api/backorders/decide', {
         method: 'POST',
-        headers: { 'idempotency-key': crypto.randomUUID() },
+        headers: { 'idempotency-key': idempotencyKey() },
         body: JSON.stringify({
           requestId: request.id,
           decision,
-          quantity: Number($('qty').value),
-          notes: $('notes').value.trim() || undefined
+          quantity: Number(values.quantity),
+          notes: values.notes || undefined
         })
       });
 
-      close();
-      await renderQueue();
+      await show();
       toast(result.splitRequestId
         ? `${copy.verb}ed — the remainder became its own request.`
         : `${copy.verb}ed.`);
-    } catch (failure) {
-      error.textContent = failure.message;
-      error.hidden = false;
-      button.disabled = false;
-      button.textContent = copy.verb;
+      return result;
     }
-  };
+  });
 }
 
 // --- register --------------------------------------------------------------
@@ -207,38 +189,43 @@ async function renderRegister() {
 
   $('view').innerHTML = `
     <div class="stats">
-      <div class="stat"><div class="n">${fmrs.length}</div><div class="l">FMRs</div></div>
-      <div class="stat"><div class="n">${n(totals.lines)}</div><div class="l">Lines</div></div>
-      <div class="stat"><div class="n">${totals.fulfillmentPct}%</div><div class="l">Fulfilled</div></div>
-      <div class="stat warn"><div class="n">${n(totals.backordered)}</div><div class="l">On backorder</div></div>
+      <div class="stat"><span class="n">${fmrs.length}</span><span class="l">FMRs</span></div>
+      <div class="stat"><span class="n">${n(totals.lines)}</span><span class="l">Lines</span></div>
+      <div class="stat stat-ok"><span class="n">${n(totals.fulfillmentPct)}%</span><span class="l">Fulfilled</span></div>
+      <div class="stat stat-warn"><span class="n">${n(totals.backordered)}</span><span class="l">On backorder</span></div>
     </div>
     <div class="tw"><table>
       <thead><tr>
-        <th>FMR</th><th>IWP</th><th>Requested by</th><th>Needed</th>
-        <th>Priority</th><th class="num">Lines</th>
-        <th class="num">Requested</th><th class="num">Issued</th>
-        <th class="num">Remaining</th><th>Progress</th><th></th>
+        <th class="col-md">FMR</th><th class="col-md">IWP</th><th class="col-lg">Requested by</th>
+        <th class="col-sm">Needed</th><th class="col-sm">Priority</th><th class="num col-tiny">Lines</th>
+        <th class="num col-sm">Requested</th><th class="num col-sm">Issued</th>
+        <th class="num col-sm">Remaining</th><th class="col-md">Progress</th><th class="col-md"></th>
       </tr></thead>
-      <tbody>${fmrs.map((f) => `
-        <tr data-fmr="${f.id}" data-number="${esc(f.fmrNumber)}">
-          <td class="mono"><strong>${esc(f.fmrNumber)}</strong></td>
-          <td class="mono dim">${esc(f.iwpNumber ?? '—')}</td>
-          <td>${esc(f.requestedBy ?? '')}</td>
-          <td class="dim">${day(f.dateRequired)}</td>
-          <td>${esc(f.priority ?? '')}</td>
-          <td class="num">${f.lineCount}</td>
-          <td class="num">${n(f.qtyRequested)}</td>
-          <td class="num">${n(f.qtyIssued)}</td>
-          <td class="num">${n(f.qtyRemaining)}</td>
-          <td><div class="bar" title="${f.fulfillmentPct}%"><i style="width:${f.fulfillmentPct}%"></i></div></td>
-          <td><div class="rowacts"><button data-renumber="${f.id}">Renumber</button></div></td>
-        </tr>`).join('')}
+      <tbody>${fmrs.map(renderRegisterRow).join('')
+        || emptyRow(11, 'No FMRs on this project yet. Publish one from Drafts or Import.')}
       </tbody>
-    </table></div>
-  `;
+    </table></div>`;
 }
 
-// --- renumber --------------------------------------------------------------
+const renderRegisterRow = (f) => `
+  <tr data-fmr="${esc(f.id)}" data-number="${esc(f.fmrNumber)}">
+    <td class="mono"><strong>${esc(f.fmrNumber)}</strong></td>
+    <td class="mono dim">${esc(f.iwpNumber ?? '—')}</td>
+    <td>${esc(f.requestedBy ?? '')}</td>
+    <td class="dim">${day(f.dateRequired)}</td>
+    <td>${esc(f.priority ?? '')}</td>
+    <td class="num">${esc(f.lineCount)}</td>
+    <td class="num">${n(f.qtyRequested)}</td>
+    <td class="num">${n(f.qtyIssued)}</td>
+    <td class="num">${n(f.qtyRemaining)}</td>
+    <td>
+      <div class="bar"><i style="width:${Number(f.fulfillmentPct)}%"></i></div>
+      <span class="vh">${esc(f.fulfillmentPct)}% fulfilled</span>
+    </td>
+    <td><div class="rowacts">
+      <button type="button" class="btn btn-sm" data-renumber="${esc(f.id)}">Renumber</button>
+    </div></td>
+  </tr>`;
 
 /**
  * Rename a published FMR.
@@ -246,63 +233,27 @@ async function renderRegister() {
  * Material Management does reassign official numbers after issue. Everything
  * already recorded against the FMR follows it — the number is stored once.
  */
-function openRenumber(fmrId, currentNumber) {
-  const backdrop = document.createElement('div');
-  backdrop.className = 'sheet-bg';
-  backdrop.innerHTML = `<div class="sheet" role="dialog" aria-modal="true" aria-label="Renumber FMR">
-    <h2>Renumber ${esc(currentNumber)}</h2>
-    <div class="for">Everything recorded against this FMR keeps its history and
-      follows the new number.</div>
-    <div class="err" id="err" hidden></div>
-    <form id="form">
-      <div class="field">
-        <label for="newNumber">New FMR number</label>
-        <input id="newNumber" type="text" required placeholder="FMR-2026-0418">
-      </div>
-      <div class="field">
-        <label for="why">Why is it changing?</label>
-        <input id="why" type="text" required placeholder="e.g. reissued by Material Management">
-      </div>
-      <div class="sheet-acts">
-        <button type="button" id="cancel">Cancel</button>
-        <button type="submit" class="primary" id="go">Renumber</button>
-      </div>
-    </form>
-  </div>`;
-
-  document.body.appendChild(backdrop);
-  $('newNumber').focus();
-
-  const close = () => backdrop.remove();
-  $('cancel').onclick = close;
-  backdrop.onclick = (e) => { if (e.target === backdrop) close(); };
-
-  $('form').onsubmit = async (event) => {
-    event.preventDefault();
-    const button = $('go');
-    button.disabled = true;
-    button.textContent = 'Working…';
-
-    try {
+async function renumber(fmrId, currentNumber) {
+  await dialog({
+    title: `Renumber ${currentNumber}`,
+    lede: 'Everything recorded against this FMR keeps its history and follows the new number.',
+    confirmLabel: 'Renumber',
+    fields: [
+      { name: 'newNumber', label: 'New FMR number', required: true, placeholder: 'FMR-2026-0418' },
+      { name: 'reason', label: 'Why is it changing?', required: true, minLength: 3,
+        placeholder: 'e.g. reissued by Material Management' }
+    ],
+    onSubmit: async (values) => {
       const result = await api('/api/fmr/renumber', {
         method: 'POST',
-        headers: { 'idempotency-key': crypto.randomUUID() },
-        body: JSON.stringify({
-          fmrId,
-          newNumber: $('newNumber').value.trim(),
-          reason: $('why').value.trim()
-        })
+        headers: { 'idempotency-key': idempotencyKey() },
+        body: JSON.stringify({ fmrId, newNumber: values.newNumber, reason: values.reason })
       });
-      close();
       toast(`${result.from} is now ${result.to}.`);
       show();
-    } catch (failure) {
-      $('err').textContent = failure.message;
-      $('err').hidden = false;
-      button.disabled = false;
-      button.textContent = 'Renumber';
+      return result;
     }
-  };
+  });
 }
 
 // --- by drawing ------------------------------------------------------------
@@ -312,49 +263,63 @@ async function renderIso() {
 
   $('view').innerHTML = `
     <div class="stats">
-      <div class="stat"><div class="n">${drawings.length}</div><div class="l">Drawings</div></div>
+      <div class="stat"><span class="n">${drawings.length}</span><span class="l">Drawings</span></div>
     </div>
     <div class="tw"><table>
       <thead><tr>
-        <th>Drawing</th><th>Sheet</th><th class="num">Lines</th><th class="num">FMRs</th>
-        <th class="num">Requested</th><th class="num">Issued</th>
-        <th class="num">Backordered</th><th>Progress</th>
+        <th class="col-md">Drawing</th><th class="col-sm">Sheet</th>
+        <th class="num col-tiny">Lines</th><th class="num col-tiny">FMRs</th>
+        <th class="num col-sm">Requested</th><th class="num col-sm">Issued</th>
+        <th class="num col-sm">Backordered</th><th class="col-md">Progress</th>
       </tr></thead>
       <tbody>${drawings.map((d) => `
         <tr>
           <td class="mono"><strong>${esc(d.isoNumber)}</strong></td>
           <td class="mono">${esc(d.isoSheet)}</td>
-          <td class="num">${d.lineCount}</td>
-          <td class="num">${d.fmrCount}</td>
+          <td class="num">${esc(d.lineCount)}</td>
+          <td class="num">${esc(d.fmrCount)}</td>
           <td class="num">${n(d.qtyRequested)}</td>
           <td class="num">${n(d.qtyIssued)}</td>
           <td class="num">${n(d.qtyBackordered)}</td>
-          <td><div class="bar" title="${d.fulfillmentPct}%"><i style="width:${d.fulfillmentPct}%"></i></div></td>
-        </tr>`).join('')}
+          <td>
+            <div class="bar"><i style="width:${Number(d.fulfillmentPct)}%"></i></div>
+            <span class="vh">${esc(d.fulfillmentPct)}% fulfilled</span>
+          </td>
+        </tr>`).join('')
+        || emptyRow(8, 'No material on this project yet.')}
       </tbody>
-    </table></div>
-  `;
+    </table></div>`;
 }
 
 // --- wiring ----------------------------------------------------------------
 
 const VIEWS = { queue: renderQueue, register: renderRegister, iso: renderIso };
+const SKELETONS = { queue: { stats: 4, rows: 8 }, register: { stats: 4, rows: 10 }, iso: { stats: 1, rows: 10 } };
 
 async function show() {
-  $('view').innerHTML = '<p class="hint">Loading…</p>';
+  // A skeleton in the shape of what is coming, rather than a blank page.
+  $('view').innerHTML = skeleton(SKELETONS[state.tab]);
   try {
     await VIEWS[state.tab]();
   } catch (failure) {
-    $('view').innerHTML = `<p class="hint">${esc(failure.message)}</p>`;
+    $('view').innerHTML = `
+      <div class="empty">
+        <h2>Could not load this</h2>
+        <p>${esc(failure.message)}</p>
+        <button type="button" class="btn btn-primary" id="retry">Try again</button>
+      </div>`;
+    $('retry').onclick = show;
   }
 }
 
-document.querySelector('.tabs').onclick = (event) => {
+$('tabs').onclick = (event) => {
   const button = event.target.closest('button[data-tab]');
   if (!button) return;
 
   state.tab = button.dataset.tab;
-  document.querySelectorAll('.tabs button').forEach((b) => b.classList.toggle('on', b === button));
+  for (const tab of $('tabs').querySelectorAll('button')) {
+    tab.setAttribute('aria-selected', String(tab === button));
+  }
   show();
 };
 
@@ -365,43 +330,31 @@ $('view').addEventListener('click', (event) => {
     return show();
   }
 
-  const renumber = event.target.closest('button[data-renumber]');
-  if (renumber) {
-    const row = renumber.closest('tr');
-    return openRenumber(renumber.dataset.renumber, row.dataset.number);
+  const renumberButton = event.target.closest('button[data-renumber]');
+  if (renumberButton) {
+    const row = renumberButton.closest('tr');
+    return renumber(renumberButton.dataset.renumber, row.dataset.number);
   }
 
-  const decide = event.target.closest('button[data-decide]');
-  if (decide) {
-    const requestId = decide.closest('tr').dataset.request;
+  const decideButton = event.target.closest('button[data-decide]');
+  if (decideButton) {
+    const requestId = decideButton.closest('tr').dataset.request;
     const request = state.data?.find((r) => r.id === requestId);
-    if (request) openDecision(request, decide.dataset.decide);
+    if (request) decide(request, decideButton.dataset.decide);
   }
 });
 
-$('project').onchange = (event) => {
-  state.projectId = event.target.value;
-  localStorage.setItem('fmr.project', state.projectId);
-  show();
-};
-
-async function start() {
+/** Statuses to filter by, so a domain rename cannot empty the queue silently. */
+async function loadFilters() {
   try {
-    const { projects } = await api('/api/me');
-    state.projects = projects;
-
-    const remembered = localStorage.getItem('fmr.project');
-    state.projectId = projects.find((p) => p.projectId === remembered)?.projectId
-      ?? projects[0]?.projectId;
-
-    $('project').innerHTML = projects
-      .map((p) => `<option value="${p.projectId}"${p.projectId === state.projectId ? ' selected' : ''}>${esc(p.name)}</option>`)
-      .join('');
-
-    show();
+    const bootstrap = await api('/api/bootstrap');
+    const statuses = bootstrap.options?.backorderStatuses;
+    if (statuses?.length) state.filters = orderFilters(statuses);
   } catch {
-    location.href = '/signin.html';
+    // The fallback list still works.
   }
 }
 
-start();
+await initShell({ current: 'office', onProjectChange: show });
+await loadFilters();
+show();

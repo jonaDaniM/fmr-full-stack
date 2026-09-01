@@ -3,26 +3,28 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>FMR Field</title>
-<link rel="stylesheet" href="/app.css">
+<meta name="color-scheme" content="light dark">
+<title>FMR — Field</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="/fmr.css">
 </head>
-<body>
-<header class="topbar">
-  <span class="brand">FMR Field</span>
-  <span class="project">
-    <select id="project" aria-label="Project"></select>
-  </span>
-</header>
+<body class="density-field">
 
-<form class="searchbar" id="searchForm">
-  <input id="q" type="search" inputmode="search" autocomplete="off"
-         placeholder="FMR number or ISO drawing" aria-label="Search">
-  <button type="submit">Search</button>
+<header class="topbar"></header>
+
+<form class="searchbar" id="searchForm" role="search">
+  <label class="vh" for="q">Search material</label>
+  <input id="q" name="q" type="search" autocomplete="off" enterkeyhint="search"
+         placeholder="FMR, drawing, or description">
+  <button type="submit" class="btn btn-primary" id="searchGo">Search</button>
 </form>
 
-<p class="hint" id="hint">Search by FMR number (FMR-2026-0417) or drawing (D-4410-01).</p>
+<p class="hint" id="hint">Search by FMR number, drawing, or what the material is.</p>
+
 <div class="list" id="results"></div>
 
-<script src="/app.js"></script>
+<script type="module" src="/app.js"></script>
 </body>
 </html>

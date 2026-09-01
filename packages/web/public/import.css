@@ -1,0 +1,40 @@
+/* Import — upload, then review one proposed FMR per sheet. */
+
+.item { margin-bottom: var(--s-4); }
+
+.item-head {
+  display: flex; align-items: center; gap: var(--s-3); flex-wrap: wrap;
+  padding: var(--s-3) var(--s-4);
+  background: var(--card);
+  border: 1px solid var(--rule);
+  border-radius: var(--r-md) var(--r-md) 0 0;
+}
+.item-head input[type='checkbox'] { width: 17px; height: 17px; accent-color: var(--accent); }
+.item-head .name {
+  font-family: var(--font-display); font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+.item.blocked .item-head { background: var(--danger-soft); border-color: var(--danger-line); }
+.item.dup .item-head { background: var(--warn-soft); border-color: var(--warn-line); }
+
+.item .issues {
+  padding: var(--s-3) var(--s-4); margin: 0;
+  background: var(--card);
+  border: 1px solid var(--rule); border-block: 0;
+}
+
+.item .tw { border-radius: 0 0 var(--r-md) var(--r-md); }
+
+.source-line {
+  font-size: var(--t-sm); color: var(--muted);
+  margin-bottom: var(--s-4);
+}
+.source-line strong { color: var(--ink); }
+
+/* What the extractor was unsure about, said plainly. */
+.extract-note {
+  padding: var(--s-3) var(--s-4); margin-bottom: var(--s-4);
+  font-size: var(--t-sm);
+  background: var(--accent-soft); color: var(--ink);
+  border: 1px solid var(--accent-line); border-radius: var(--r-md);
+}

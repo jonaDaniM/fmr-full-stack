@@ -5,40 +5,18 @@
  * decide is on the card — what is left to find, what is on the shelf, what
  * the office has said about a backorder.
  *
- * No framework: this runs on old phones over site wifi.
+ * This runs on old phones over site wifi, so it stays small and the type
+ * stack starts with system-ui: text must not wait on a font request.
  */
 
-const state = { projects: [], projectId: null, results: [], sheet: null };
+import { api, idempotencyKey } from './lib/api.js';
+import { $, esc, n } from './lib/dom.js';
+import { dialog } from './lib/modal.js';
+import { toast } from './lib/toast.js';
+import { initShell } from './lib/shell.js';
+import { ceilingFor } from './lib/ceilings.js';
 
-const $ = (id) => document.getElementById(id);
-const esc = (s) => String(s ?? '').replace(/[&<>"']/g,
-  (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const n = (v) => Number(v ?? 0).toLocaleString(undefined, { maximumFractionDigits: 2 });
-
-async function api(path, options = {}) {
-  const response = await fetch(path, {
-    ...options,
-    headers: {
-      'content-type': 'application/json',
-      ...(state.projectId ? { 'x-project-id': state.projectId } : {}),
-      ...options.headers
-    }
-  });
-
-  const body = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(body.error || 'Something went wrong.');
-  return body;
-}
-
-function toast(message) {
-  document.querySelector('.toast')?.remove();
-  const el = document.createElement('div');
-  el.className = 'toast';
-  el.setAttribute('role', 'status');
-  el.textContent = message;
-  document.body.appendChild(el);
-  setTimeout(() => el.remove(), 3200);
-}
+const state = { results: [], searching: false, locked: null };
 
 // --- actions available on a line ------------------------------------------
 
@@ -50,6 +28,21 @@ const ACTION_LABELS = {
   ISSUE_FROM_BAG: 'Issue from bag',
   BACKORDER_REQUESTED: 'Backorder'
 };
+
+const NEEDS = {
+  CONFIRM_AVAILABLE: ['quantity', 'storageLocation'],
+  BAG: ['quantity', 'bagTagNumber', 'storageLocation'],
+  DIRECT_ISSUE: ['quantity', 'issuedToName', 'storageLocation'],
+  ISSUE_FROM_AVAILABLE: ['quantity', 'issuedToName'],
+  ISSUE_FROM_BAG: ['quantity', 'bagTagId', 'issuedToName'],
+  BACKORDER_REQUESTED: ['quantity', 'reason']
+};
+
+// Filled from /api/bootstrap so the office can add a reason without a deploy.
+// The fallback covers the case where bootstrap has not answered yet.
+let REASONS = ['Not in stock', 'Wrong size received', 'Damaged',
+               'Short shipped', 'Cannot locate'];
+let STORAGE_LOCATIONS = [];
 
 /** Which actions make sense for this line right now. */
 function availableActions(line) {
@@ -69,12 +62,12 @@ function availableActions(line) {
   return actions;
 }
 
-function statusClass(status) {
-  if (status === 'Issued') return '';
-  if (status.includes('Backorder')) return 'warn';
-  if (status === 'Open') return 'danger';
-  return '';
-}
+const statusPill = (status) => {
+  if (status === 'Issued') return 'pill';
+  if (status.includes('Backorder')) return 'pill pill-warn';
+  if (status === 'Open') return 'pill pill-danger';
+  return 'pill pill-quiet';
+};
 
 // --- rendering -------------------------------------------------------------
 
@@ -84,7 +77,7 @@ function renderCard(line) {
 
   const notices = (line.notices ?? []).map((notice) => {
     const rejected = notice.status === 'Rejected';
-    return `<div class="notice ${rejected ? 'rejected' : ''}">
+    return `<div class="notice ${rejected ? 'notice-rejected' : ''}">
       <b>${rejected ? 'Rejected' : 'Returned'}:</b>
       ${n(rejected ? notice.qtyRequested : notice.qtyPending)} ${esc(line.uom ?? '')}
       &mdash; ${esc(notice.adminNotes || notice.returnedReviewReason || 'see the office')}
@@ -97,12 +90,12 @@ function renderCard(line) {
       ).join('')}</div>`
     : '';
 
-  return `<article class="card" data-line="${line.id}">
+  return `<article class="card" data-line="${esc(line.id)}">
     <div class="card-head">
       <div class="card-top">
         <span class="fmr">${esc(line.fmrNumber)}</span>
-        <span class="iso">${esc(line.isoNumber)} sht ${esc(line.isoSheet)} &middot; line ${line.lineNumber}</span>
-        <span class="pill ${statusClass(line.status)}">${esc(line.status)}</span>
+        <span class="iso">${esc(line.isoNumber)} sht ${esc(line.isoSheet)} &middot; line ${esc(line.lineNumber)}</span>
+        <span class="${statusPill(line.status)}">${esc(line.status)}</span>
       </div>
       <div class="desc">${esc(line.description ?? '')}</div>
       <div class="spec">${esc(line.commodityCode ?? '')} &middot; ${esc(line.size ?? '')}</div>
@@ -127,91 +120,62 @@ function renderCard(line) {
 
     <div class="acts">
       ${actions.map((action, i) =>
-        `<button data-action="${action}" class="${i === 0 ? 'primary' : ''}">${ACTION_LABELS[action]}</button>`
-      ).join('') || '<span class="hint" style="padding:4px">Nothing outstanding on this line.</span>'}
+        `<button type="button" data-action="${action}"
+                 class="btn ${i === 0 ? 'btn-primary' : ''}">${ACTION_LABELS[action]}</button>`
+      ).join('') || '<span class="dim">Nothing outstanding on this line.</span>'}
     </div>
   </article>`;
 }
 
 function renderResults() {
   const container = $('results');
+  const hint = $('hint');
 
   if (!state.results.length) {
     container.innerHTML = '';
-    $('hint').textContent = 'No lines matched that search.';
-    $('hint').hidden = false;
+    hint.className = 'empty';
+    hint.innerHTML = `<h2>Nothing matched</h2>
+      <p>Try the FMR number, the drawing number, or a word from the description.</p>`;
+    hint.hidden = false;
     return;
   }
 
-  $('hint').hidden = true;
+  hint.hidden = true;
   container.innerHTML = state.results.map(renderCard).join('');
 }
 
-// --- action sheet ----------------------------------------------------------
-
-const NEEDS = {
-  CONFIRM_AVAILABLE: ['quantity', 'storageLocation'],
-  BAG: ['quantity', 'bagTagNumber', 'storageLocation'],
-  DIRECT_ISSUE: ['quantity', 'issuedToName', 'storageLocation'],
-  ISSUE_FROM_AVAILABLE: ['quantity', 'issuedToName'],
-  ISSUE_FROM_BAG: ['quantity', 'bagTagId', 'issuedToName'],
-  BACKORDER_REQUESTED: ['quantity', 'reason']
-};
-
-// Filled from /api/bootstrap so the office can add a reason without a deploy.
-// The fallback covers the case where bootstrap has not answered yet.
-let REASONS = ['Not in stock', 'Wrong size received', 'Damaged',
-               'Short shipped', 'Cannot locate'];
-let STORAGE_LOCATIONS = [];
-
-/** The most this action may move, mirroring the rules the server enforces. */
-function ceilingFor(line, action) {
-  const q = line.quantities;
-  const locatable = Math.max(0, Math.min(q.notYetLocated, q.remaining) - q.pendingBackorder);
-
-  switch (action) {
-    case 'CONFIRM_AVAILABLE': return locatable;
-    case 'BAG': return q.available + locatable;
-    case 'DIRECT_ISSUE': return Math.min(locatable, q.remaining);
-    case 'ISSUE_FROM_AVAILABLE': return Math.min(q.available, q.remaining);
-    case 'ISSUE_FROM_BAG': return Math.min(q.bagged, q.remaining);
-    case 'BACKORDER_REQUESTED':
-      return Math.max(0, q.remaining - q.available - q.bagged
-        - q.pendingBackorder - q.confirmedBackorder);
-    default: return 0;
-  }
+/** A failure looks like a failure, not like an empty result. */
+function renderSearchError(message) {
+  $('results').innerHTML = '';
+  const hint = $('hint');
+  hint.className = 'empty';
+  hint.innerHTML = `<h2>Search did not run</h2><p>${esc(message)}</p>`;
+  hint.hidden = false;
 }
 
-function openSheet(line, action) {
-  const needs = NEEDS[action];
+// --- acting on a line ------------------------------------------------------
+
+function fieldsFor(line, action) {
   const max = ceilingFor(line, action);
 
-  const fields = needs.map((field) => {
+  return NEEDS[action].map((field) => {
     if (field === 'quantity') {
-      return `<div class="field">
-        <label for="f-quantity">Quantity (${esc(line.uom ?? '')})</label>
-        <input id="f-quantity" type="number" inputmode="decimal" min="0.0001"
-               max="${max}" step="any" value="${max}" required>
-        <div class="max">Up to ${n(max)} ${esc(line.uom ?? '')}</div>
-      </div>`;
+      return {
+        name: 'quantity', label: `Quantity (${line.uom ?? ''})`, type: 'number',
+        value: max, min: 0.0001, max, step: 'any', inputmode: 'decimal', required: true,
+        hint: `Up to ${n(max)} ${line.uom ?? ''}`
+      };
     }
     if (field === 'reason') {
-      return `<div class="field">
-        <label for="f-reason">Reason</label>
-        <select id="f-reason" required>
-          ${REASONS.map((r) => `<option>${esc(r)}</option>`).join('')}
-        </select>
-      </div>`;
+      return { name: 'reason', label: 'Reason', type: 'select', options: REASONS, required: true };
     }
     if (field === 'bagTagId') {
-      return `<div class="field">
-        <label for="f-bagTagId">Bag</label>
-        <select id="f-bagTagId" required>
-          ${line.activeBags.map((b) =>
-            `<option value="${b.bagTagId}">${esc(b.tagNumber)} — ${n(b.qtyRemaining)} left</option>`
-          ).join('')}
-        </select>
-      </div>`;
+      return {
+        name: 'bagTagId', label: 'Bag', type: 'select', required: true,
+        options: line.activeBags.map((bag) => ({
+          value: bag.bagTagId, label: `${bag.tagNumber} — ${n(bag.qtyRemaining)} left`
+        }))
+      };
     }
 
     const labels = {
@@ -220,103 +184,57 @@ function openSheet(line, action) {
       bagTagNumber: 'Bag tag number'
     };
     const isLocation = field === 'storageLocation';
-    const prefill = isLocation ? (line.storageLocation ?? '') : '';
+    // Location is optional on a direct issue: the material never sat anywhere.
     const optional = isLocation && action === 'DIRECT_ISSUE';
 
-    // Locations are free text with suggestions: a warehouse invents new ones
-    // faster than anyone maintains a list.
-    const suggestions = isLocation && STORAGE_LOCATIONS.length
-      ? `<datalist id="locations">${STORAGE_LOCATIONS
-          .map((l) => `<option value="${esc(l)}">`).join('')}</datalist>`
-      : '';
-
-    return `<div class="field">
-      <label for="f-${field}">${labels[field]}${optional ? ' (optional)' : ''}</label>
-      <input id="f-${field}" type="text" value="${esc(prefill)}"
-             ${isLocation && suggestions ? 'list="locations"' : ''}
-             ${optional ? '' : 'required'}>
-      ${suggestions}
-    </div>`;
-  }).join('');
-
-  const backdrop = document.createElement('div');
-  backdrop.className = 'sheet-bg';
-  backdrop.innerHTML = `<div class="sheet" role="dialog" aria-modal="true" aria-label="${ACTION_LABELS[action]}">
-    <h2>${ACTION_LABELS[action]}</h2>
-    <div class="for">${esc(line.fmrNumber)} &middot; line ${line.lineNumber} &middot; ${esc(line.description ?? '')}</div>
-    <div class="err" id="sheetErr" hidden></div>
-    <form id="sheetForm">
-      ${fields}
-      <div class="field">
-        <label for="f-notes">Notes (optional)</label>
-        <textarea id="f-notes" rows="2"></textarea>
-      </div>
-      <div class="sheet-acts">
-        <button type="button" id="cancel">Cancel</button>
-        <button type="submit" class="primary" id="confirm">${ACTION_LABELS[action]}</button>
-      </div>
-    </form>
-  </div>`;
-
-  document.body.appendChild(backdrop);
-  state.sheet = backdrop;
-  $('f-quantity')?.focus();
-
-  const close = () => { backdrop.remove(); state.sheet = null; };
-  $('cancel').onclick = close;
-  backdrop.onclick = (e) => { if (e.target === backdrop) close(); };
-  document.addEventListener('keydown', function onKey(e) {
-    if (e.key === 'Escape') { close(); document.removeEventListener('keydown', onKey); }
+    return {
+      name: field,
+      label: labels[field] + (optional ? ' (optional)' : ''),
+      value: isLocation ? (line.storageLocation ?? '') : '',
+      required: !optional,
+      // A warehouse invents locations faster than anyone maintains a list, so
+      // these are suggestions over free text, not a closed set.
+      ...(isLocation && STORAGE_LOCATIONS.length
+        ? { list: 'locations', suggestions: STORAGE_LOCATIONS }
+        : {})
+    };
   });
-
-  $('sheetForm').onsubmit = async (event) => {
-    event.preventDefault();
-    await submit(line, action, needs, close);
-  };
 }
 
-async function submit(line, action, needs, close) {
-  const button = $('confirm');
-  const error = $('sheetErr');
+async function act(line, action) {
+  await dialog({
+    title: ACTION_LABELS[action],
+    lede: `${line.fmrNumber} · line ${line.lineNumber} · ${line.description ?? ''}`,
+    confirmLabel: ACTION_LABELS[action],
+    workingLabel: 'Working…',
+    fields: [
+      ...fieldsFor(line, action),
+      { name: 'notes', label: 'Notes (optional)', type: 'textarea', rows: 2 }
+    ],
+    onSubmit: async (values) => {
+      const payload = { action, lineId: line.id };
+      for (const field of NEEDS[action]) {
+        payload[field] = field === 'quantity' ? Number(values.quantity) : values[field];
+      }
+      if (values.notes) payload.notes = values.notes;
 
-  const payload = { action, lineId: line.id };
-  for (const field of needs) {
-    const el = $(`f-${field}`);
-    payload[field] = field === 'quantity' ? Number(el.value) : el.value.trim();
-  }
-  const notes = $('f-notes').value.trim();
-  if (notes) payload.notes = notes;
+      // One key per attempt: a retry after a dropped connection replays the
+      // original result instead of moving the material twice.
+      const result = await api('/api/field/action', {
+        method: 'POST',
+        headers: { 'idempotency-key': idempotencyKey() },
+        body: JSON.stringify(payload)
+      });
 
-  button.disabled = true;
-  button.textContent = 'Working…';
-  error.hidden = true;
+      // Swap the updated line back into the list in place.
+      const index = state.results.findIndex((l) => l.id === line.id);
+      if (index >= 0) state.results[index] = { ...state.results[index], ...result.line };
 
-  try {
-    // One key per attempt: a retry after a dropped connection replays the
-    // original result instead of moving the material twice.
-    const result = await api('/api/field/action', {
-      method: 'POST',
-      headers: { 'idempotency-key': crypto.randomUUID() },
-      body: JSON.stringify(payload)
-    });
-
-    // Swap the updated line back into the list in place.
-    const index = state.results.findIndex((l) => l.id === line.id);
-    if (index >= 0) {
-      state.results[index] = { ...state.results[index], ...result.line };
+      renderResults();
+      toast(result.replayed ? 'Already recorded.' : `${ACTION_LABELS[action]} recorded.`);
+      return result;
     }
-
-    close();
-    renderResults();
-    toast(result.replayed
-      ? 'Already recorded.'
-      : `${ACTION_LABELS[action]} recorded.`);
-  } catch (failure) {
-    error.textContent = failure.message;
-    error.hidden = false;
-    button.disabled = false;
-    button.textContent = ACTION_LABELS[action];
-  }
+  });
 }
 
 // --- wiring ----------------------------------------------------------------
@@ -327,53 +245,36 @@ $('results').addEventListener('click', (event) => {
 
   const lineId = button.closest('.card').dataset.line;
   const line = state.results.find((l) => l.id === lineId);
-  if (line) openSheet(line, button.dataset.action);
+  if (line) act(line, button.dataset.action);
 });
 
 $('searchForm').onsubmit = async (event) => {
   event.preventDefault();
   const query = $('q').value.trim();
-  if (!query) return;
+  if (!query || state.searching) return;   // a gloved double-tap raced itself
 
-  $('hint').textContent = 'Searching…';
-  $('hint').hidden = false;
+  const button = $('searchGo');
+  state.searching = true;
+  button.disabled = true;
+  button.setAttribute('aria-busy', 'true');
+
+  const hint = $('hint');
+  hint.className = 'hint';
+  hint.textContent = 'Searching…';
+  hint.hidden = false;
 
   try {
     const { results } = await api(`/api/search?q=${encodeURIComponent(query)}`);
     state.results = results;
     renderResults();
   } catch (failure) {
-    $('results').innerHTML = '';
-    $('hint').textContent = failure.message;
-    $('hint').hidden = false;
+    renderSearchError(failure.message);
+  } finally {
+    state.searching = false;
+    button.disabled = false;
+    button.removeAttribute('aria-busy');
   }
 };
-
-$('project').onchange = (event) => {
-  state.projectId = event.target.value;
-  localStorage.setItem('fmr.project', state.projectId);
-  state.results = [];
-  renderResults();
-};
-
-async function start() {
-  try {
-    const { projects } = await api('/api/me');
-    state.projects = projects;
-
-    const remembered = localStorage.getItem('fmr.project');
-    state.projectId = projects.find((p) => p.projectId === remembered)?.projectId
-      ?? projects[0]?.projectId;
-
-    $('project').innerHTML = projects
-      .map((p) => `<option value="${p.projectId}"${p.projectId === state.projectId ? ' selected' : ''}>${esc(p.name)}</option>`)
-      .join('');
-
-    await loadOptions();
-  } catch {
-    location.href = '/signin.html';
-  }
-}
 
 /**
  * Dropdown values, and whether the project is paused.
@@ -390,15 +291,30 @@ async function loadOptions() {
     }
     STORAGE_LOCATIONS = bootstrap.options?.storageLocations ?? [];
 
-    if (bootstrap.controls?.fieldLocked) {
-      $('hint').textContent = bootstrap.controls.lockReason
-        ? `Material movement is paused: ${bootstrap.controls.lockReason}`
-        : 'Material movement is paused on this project.';
-      $('hint').hidden = false;
+    state.locked = bootstrap.controls?.fieldLocked ? bootstrap.controls : null;
+    if (state.locked) {
+      const hint = $('hint');
+      hint.className = 'empty';
+      hint.innerHTML = `<h2>Material movement is paused</h2>
+        <p>${esc(state.locked.lockReason || 'The office has paused work on this project.')}</p>`;
+      hint.hidden = false;
     }
   } catch {
     // Keep the defaults.
   }
 }
 
-start();
+await initShell({
+  current: 'field',
+  onProjectChange: () => {
+    state.results = [];
+    $('results').innerHTML = '';
+    const hint = $('hint');
+    hint.className = 'hint';
+    hint.textContent = 'Search by FMR number, drawing, or what the material is.';
+    hint.hidden = false;
+    loadOptions();
+  }
+});
+
+await loadOptions();

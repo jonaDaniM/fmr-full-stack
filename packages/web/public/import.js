@@ -1,84 +1,108 @@
 /**
- * Import review.
+ * Import.
  *
- * A workbook is parsed into proposed FMRs, and nothing reaches the ledger
- * until someone has looked at it. Anything the parser could not read is shown
- * against the row it came from, and quantities can be corrected in place.
+ * Two kinds of file arrive here. A workbook of FMRs, which is what the office
+ * has always produced. And the CSV that extract_materials.py writes after
+ * reading drawings — same destination, different reader, and the page picks
+ * between them by looking at what was actually dropped.
+ *
+ * Either way nothing is created until a person has read it. That is the whole
+ * point of this screen.
  */
 
-const state = { projectId: null, batch: null };
+import { api, upload as uploadWithProgress, idempotencyKey } from './lib/api.js';
+import { $, esc, n } from './lib/dom.js';
+import { confirmAction } from './lib/modal.js';
+import { toast, toastError } from './lib/toast.js';
+import { initShell } from './lib/shell.js';
 
-const $ = (id) => document.getElementById(id);
-const esc = (s) => String(s ?? '').replace(/[&<>"']/g,
-  (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const n = (v) => v == null ? '—' : Number(v).toLocaleString(undefined, { maximumFractionDigits: 2 });
-
-async function api(path, options = {}) {
-  const response = await fetch(path, {
-    ...options,
-    headers: {
-      ...(options.body instanceof ArrayBuffer || options.raw
-        ? {} : { 'content-type': 'application/json' }),
-      ...(state.projectId ? { 'x-project-id': state.projectId } : {}),
-      ...options.headers
-    }
-  });
-  const body = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(body.error || 'Something went wrong.');
-  return body;
-}
-
-function toast(message) {
-  document.querySelector('.toast')?.remove();
-  const el = document.createElement('div');
-  el.className = 'toast';
-  el.setAttribute('role', 'status');
-  el.textContent = message;
-  document.body.appendChild(el);
-  setTimeout(() => el.remove(), 3600);
-}
+const state = { batch: null, extraction: null };
 
 // --- upload ----------------------------------------------------------------
 
-function renderDrop() {
+function renderDrop(message = null) {
   $('view').innerHTML = `
+    ${message ? `<div class="issue issue-error" style="margin-bottom:var(--s-4)">${esc(message)}</div>` : ''}
     <div class="drop" id="drop">
-      <p>Drop an FMR workbook here, or choose a file.<br>
-         <span style="font-size:13px">Nothing is created until you have reviewed it.</span></p>
-      <label for="file">Choose file<input id="file" type="file" accept=".xlsx,.xls,.csv"></label>
+      <h2>Drop a file here</h2>
+      <p>An FMR workbook, or the CSV that the drawing extractor writes.
+         Nothing is created until you have reviewed it.</p>
+      <input id="file" type="file" accept=".xlsx,.xls,.csv">
+      <label for="file" class="btn btn-primary">Choose file</label>
     </div>
-    <p class="hint">Accepts .xlsx and .csv. Sheets are read one per FMR.</p>
-  `;
+    <p class="hint">Workbooks are read one sheet per FMR. An extraction CSV is
+       read one drawing per FMR, and every line carries the page it came from.</p>`;
 
   const drop = $('drop');
   const file = $('file');
 
-  file.onchange = () => file.files[0] && upload(file.files[0]);
+  file.onchange = () => file.files[0] && send(file.files[0]);
 
-  ['dragenter', 'dragover'].forEach((event) =>
-    drop.addEventListener(event, (e) => { e.preventDefault(); drop.classList.add('over'); }));
-  ['dragleave', 'drop'].forEach((event) =>
-    drop.addEventListener(event, (e) => { e.preventDefault(); drop.classList.remove('over'); }));
+  for (const event of ['dragenter', 'dragover']) {
+    drop.addEventListener(event, (e) => { e.preventDefault(); drop.classList.add('over'); });
+  }
+  for (const event of ['dragleave', 'drop']) {
+    drop.addEventListener(event, (e) => { e.preventDefault(); drop.classList.remove('over'); });
+  }
 
   drop.addEventListener('drop', (e) => {
     const dropped = e.dataTransfer?.files?.[0];
-    if (dropped) upload(dropped);
+    if (dropped) send(dropped);
   });
 }
 
-async function upload(file) {
-  $('view').innerHTML = `<p class="hint">Reading ${esc(file.name)}…</p>`;
+/**
+ * Which reader this file needs.
+ *
+ * The extractor's CSV always names the PDF each row came from and scores its
+ * own confidence. No FMR workbook has those columns, so the header settles it
+ * without asking the user to classify their own file.
+ */
+function looksExtracted(text) {
+  const header = text.slice(0, 400).split(/\r?\n/)[0]?.toLowerCase() ?? '';
+  return header.includes('source_pdf') && header.includes('confidence');
+}
+
+async function send(file) {
+  const buffer = await file.arrayBuffer();
+
+  // A CSV could be either kind, so read the header before choosing a route.
+  const extracted = /\.csv$/i.test(file.name)
+    && looksExtracted(new TextDecoder().decode(buffer.slice(0, 400)));
+
+  renderUploading(file.name, extracted);
+
+  const path = extracted
+    ? `/api/import/extracted?filename=${encodeURIComponent(file.name)}`
+    : `/api/import/stage?filename=${encodeURIComponent(file.name)}`;
 
   try {
-    const { batchId } = await api(
-      `/api/import/stage?filename=${encodeURIComponent(file.name)}`,
-      { method: 'POST', body: await file.arrayBuffer(), raw: true }
-    );
-    await loadBatch(batchId);
+    const result = await uploadWithProgress(path, buffer, {
+      onProgress: (fraction) => {
+        const bar = $('progress');
+        if (bar) bar.style.width = `${Math.round(fraction * 100)}%`;
+        // Once the bytes are up, the server is still parsing. Say so, rather
+        // than leaving a full bar sitting under a stale label.
+        if (fraction === 1) $('uploadWhat').textContent = 'Reading it…';
+      }
+    });
+
+    state.extraction = result.description ?? null;
+    await loadBatch(result.batchId);
   } catch (failure) {
-    $('view').innerHTML = `<p class="hint">${esc(failure.message)}</p>`;
-    setTimeout(renderDrop, 3000);
+    // The message used to be wiped by a timer three seconds later, which is
+    // not long enough to read "that file is too large" and act on it.
+    renderDrop(failure.message);
   }
+}
+
+function renderUploading(filename, extracted) {
+  $('view').innerHTML = `
+    <div class="drop">
+      <h2>${esc(filename)}</h2>
+      <p id="uploadWhat">${extracted ? 'Sending the extraction…' : 'Sending the workbook…'}</p>
+      <div class="progress"><i id="progress" style="width:0%"></i></div>
+    </div>`;
 }
 
 // --- review ----------------------------------------------------------------
@@ -95,65 +119,86 @@ function renderBatch() {
 
   $('view').innerHTML = `
     <div class="stats">
-      <div class="stat"><div class="n">${batch.summary.sheets}</div><div class="l">Sheets</div></div>
-      <div class="stat"><div class="n">${batch.summary.lines}</div><div class="l">Lines</div></div>
-      <div class="stat ${batch.summary.errors ? 'warn' : ''}">
-        <div class="n">${batch.summary.errors}</div><div class="l">Errors</div></div>
-      <div class="stat"><div class="n">${batch.summary.warnings}</div><div class="l">Warnings</div></div>
+      <div class="stat"><span class="n">${batch.summary.sheets}</span><span class="l">Sheets</span></div>
+      <div class="stat"><span class="n">${batch.summary.lines}</span><span class="l">Lines</span></div>
+      <div class="stat ${batch.summary.errors ? 'stat-danger' : ''}">
+        <span class="n">${batch.summary.errors}</span><span class="l">Errors</span></div>
+      <div class="stat ${batch.summary.warnings ? 'stat-warn' : ''}">
+        <span class="n">${batch.summary.warnings}</span><span class="l">Warnings</span></div>
     </div>
 
-    <p class="hint" style="text-align:left;padding:0 0 14px">
-      ${esc(batch.sourceName)} &middot; profile "${esc(batch.profileName)}"
+    ${state.extraction ? `<div class="extract-note">${esc(state.extraction)}</div>` : ''}
+
+    <p class="source-line">
+      <strong>${esc(batch.sourceName)}</strong> &middot; read with the
+      "${esc(batch.profileName)}" profile
       ${batch.summary.errors
-        ? '&middot; errors must be fixed in the source file before publishing'
+        ? '&middot; errors must be fixed before publishing'
         : ''}
     </p>
 
-    ${batch.items.map(renderItem).join('')}
+    ${batch.items.length
+      ? batch.items.map(renderItem).join('')
+      : `<div class="empty">
+           <h2>Nothing to review</h2>
+           <p>No FMRs were found in that file. Check it is the right one, or that
+              the sheet names match what the profile expects.</p>
+           <button type="button" class="btn btn-primary" id="again">Try another file</button>
+         </div>`}
 
-    <div class="publishbar">
-      <span>${selected} of ${selectable.length} selected</span>
-      <span style="margin-left:auto"></span>
-      <button id="publish" ${batch.summary.errors || !selected ? 'disabled' : ''}>
-        Publish ${selected} FMR${selected === 1 ? '' : 's'}
-      </button>
-    </div>
-  `;
+    ${batch.items.length ? `
+      <div class="publishbar">
+        <span>${selected} of ${selectable.length} selected</span>
+        <span class="spacer"></span>
+        <button type="button" class="btn btn-quiet" id="again">Start over</button>
+        <button type="button" class="btn btn-primary" id="publish"
+                ${batch.summary.errors || !selected ? 'disabled' : ''}>
+          Publish ${selected} FMR${selected === 1 ? '' : 's'}
+        </button>
+      </div>` : ''}`;
 
-  $('publish').onclick = publish;
+  $('publish')?.addEventListener('click', publish);
+  $('again')?.addEventListener('click', () => {
+    state.batch = null;
+    state.extraction = null;
+    renderDrop();
+  });
 }
 
 function renderItem(item) {
   const cls = item.status === 'Blocked' ? 'blocked' : item.isDuplicate ? 'dup' : '';
 
-  return `<section class="item ${cls}" data-item="${item.id}">
+  return `<section class="item ${cls}" data-item="${esc(item.id)}">
     <div class="item-head">
-      <input type="checkbox" data-select="${item.id}"
+      <input type="checkbox" data-select="${esc(item.id)}"
              ${item.selected ? 'checked' : ''}
              ${item.status === 'Blocked' ? 'disabled' : ''}
              aria-label="Include ${esc(item.fmrNumber ?? item.sheetName)}">
       <span class="name">${esc(item.fmrNumber ?? '(no FMR number)')}</span>
       <span class="dim">${esc(item.isoNumber ?? '')} sht ${esc(item.isoSheet ?? '')}
         &middot; ${item.lines.length} lines &middot; sheet "${esc(item.sheetName)}"</span>
-      ${item.isDuplicate ? '<span class="pill warn">Already exists</span>' : ''}
-      ${item.status === 'Blocked' ? '<span class="pill danger">Blocked</span>' : ''}
+      ${item.isDuplicate ? '<span class="pill pill-warn">Already exists</span>' : ''}
+      ${item.status === 'Blocked' ? '<span class="pill pill-danger">Blocked</span>' : ''}
     </div>
 
-    ${item.issues.length ? `<div style="padding:10px 14px;background:var(--card);border:1px solid var(--rule);border-bottom:0">
-      ${item.issues.map((i) => `<div class="issue ${esc(i.severity)}">
-        ${i.sourceRow ? `<span class="where">Row ${i.sourceRow}</span>` : ''}${esc(i.message)}
-      </div>`).join('')}
+    ${item.issues.length ? `<div class="issues">
+      ${item.issues.map((issue) => `
+        <div class="issue issue-${esc(issue.severity)}">
+          ${issue.sourceRow ? `<span class="where">Row ${esc(issue.sourceRow)}</span>` : ''}
+          <span>${esc(issue.message)}</span>
+        </div>`).join('')}
     </div>` : ''}
 
     <div class="tw"><table>
       <thead><tr>
-        <th>#</th><th>Source row</th><th>Code</th><th>Size</th>
-        <th>Description</th><th class="num">Qty</th><th>UOM</th>
+        <th class="col-tiny">#</th><th class="col-sm">Source row</th>
+        <th class="col-md">Code</th><th class="col-sm">Size</th>
+        <th class="col-grow">Description</th><th class="num col-sm">Qty</th><th class="col-sm">UOM</th>
       </tr></thead>
       <tbody>${item.lines.map((l) => `
-        <tr data-line="${l.id}">
-          <td class="mono">${l.lineNumber}</td>
-          <td class="dim mono">${l.sourceRow ?? ''}</td>
+        <tr data-line="${esc(l.id)}" ${rowIsFlagged(item, l) ? 'class="row-bad"' : ''}>
+          <td class="num">${esc(l.lineNumber)}</td>
+          <td class="dim num">${esc(l.sourceRow ?? '')}</td>
           <td class="mono" contenteditable data-field="commodityCode">${esc(l.commodityCode ?? '')}</td>
           <td class="mono" contenteditable data-field="size">${esc(l.size ?? '')}</td>
           <td contenteditable data-field="description">${esc(l.description ?? '')}</td>
@@ -165,20 +210,48 @@ function renderItem(item) {
   </section>`;
 }
 
+/** An issue names a source row; mark that row so it can be found by eye. */
+const rowIsFlagged = (item, line) =>
+  line.sourceRow != null
+  && item.issues.some((i) => i.severity === 'error' && i.sourceRow === line.sourceRow);
+
 // --- edits -----------------------------------------------------------------
 
-document.addEventListener('change', (event) => {
+// Scoped to the view, not the document: the old listeners fired on any change
+// or blur anywhere on the page, including the project selector.
+$('view').addEventListener('change', (event) => {
   const box = event.target.closest('input[data-select]');
-  if (!box) return;
+  if (!box || !state.batch) return;
 
   const item = state.batch.items.find((i) => i.id === box.dataset.select);
-  if (item) { item.selected = box.checked; renderBatch(); }
+  if (!item) return;
+
+  item.selected = box.checked;
+
+  // Update only the publish bar. Re-rendering everything used to destroy
+  // scroll position and any half-typed cell.
+  updatePublishBar();
 });
 
+function updatePublishBar() {
+  const batch = state.batch;
+  const selectable = batch.items.filter((i) => i.status !== 'Blocked');
+  const selected = batch.items.filter((i) => i.selected).length;
+
+  const bar = document.querySelector('.publishbar');
+  if (!bar) return;
+
+  bar.firstElementChild.textContent = `${selected} of ${selectable.length} selected`;
+
+  const button = $('publish');
+  button.disabled = Boolean(batch.summary.errors) || !selected;
+  button.textContent = `Publish ${selected} FMR${selected === 1 ? '' : 's'}`;
+}
+
 /** Save a corrected cell when focus leaves it. */
-document.addEventListener('focusout', async (event) => {
+$('view').addEventListener('focusout', async (event) => {
   const cell = event.target.closest('td[contenteditable]');
-  if (!cell) return;
+  if (!cell || !state.batch) return;
 
   const lineId = cell.closest('tr').dataset.line;
   const field = cell.dataset.field;
@@ -186,10 +259,11 @@ document.addEventListener('focusout', async (event) => {
   const value = field === 'quantity' ? Number(raw.replace(/,/g, '')) : raw;
 
   if (field === 'quantity' && !Number.isFinite(value)) {
-    cell.style.color = 'var(--danger)';
+    cell.classList.add('bad');
     return;
   }
-  cell.style.color = '';
+  cell.classList.remove('bad');
+  cell.classList.add('saving');
 
   try {
     await api('/api/import/line', {
@@ -201,12 +275,30 @@ document.addEventListener('focusout', async (event) => {
       const line = item.lines.find((l) => l.id === lineId);
       if (line) line[field] = value;
     }
+
+    cell.classList.remove('saving');
+    cell.classList.add('saved');
+    setTimeout(() => cell.classList.remove('saved'), 900);
   } catch (failure) {
-    toast(failure.message);
+    cell.classList.remove('saving');
+    cell.classList.add('bad');
+    toastError(failure.message);
   }
 });
 
 async function publish() {
+  const items = state.batch.items.filter((i) => i.selected);
+
+  const sure = await confirmAction({
+    title: `Publish ${items.length} FMR${items.length === 1 ? '' : 's'}?`,
+    lede: state.batch.sourceName,
+    body: `<p class="dim">The crews will see ${items.length === 1 ? 'it' : 'them'}
+           immediately and can start pulling material. Publishing cannot be undone —
+           a mistake afterwards has to be corrected on the ledger.</p>`,
+    confirmLabel: 'Publish'
+  });
+  if (!sure) return;
+
   const button = $('publish');
   button.disabled = true;
   button.textContent = 'Publishing…';
@@ -214,45 +306,61 @@ async function publish() {
   try {
     const result = await api('/api/import/publish', {
       method: 'POST',
-      headers: { 'idempotency-key': crypto.randomUUID() },
+      headers: { 'idempotency-key': idempotencyKey() },
       body: JSON.stringify({
         batchId: state.batch.id,
-        itemIds: state.batch.items.filter((i) => i.selected).map((i) => i.id)
+        itemIds: items.map((i) => i.id)
       })
     });
 
     toast(`Published ${result.count} FMR${result.count === 1 ? '' : 's'}.`);
-    setTimeout(renderDrop, 1500);
+    renderPublished(result.count);
   } catch (failure) {
-    toast(failure.message);
+    toastError(failure.message);
     button.disabled = false;
-    button.textContent = 'Publish';
+    updatePublishBar();
   }
 }
 
-// --- start -----------------------------------------------------------------
+/** Say what happened, and offer somewhere to go, rather than a bare drop zone. */
+function renderPublished(count) {
+  state.batch = null;
+  state.extraction = null;
 
-$('project').onchange = (event) => {
-  state.projectId = event.target.value;
-  localStorage.setItem('fmr.project', state.projectId);
-  renderDrop();
-};
+  $('view').innerHTML = `
+    <div class="empty">
+      <h2>${count} FMR${count === 1 ? '' : 's'} published</h2>
+      <p>They are live. The crews can search for this material now.</p>
+      <div style="display:flex;gap:var(--s-3);justify-content:center;margin-top:var(--s-4)">
+        <a class="btn btn-primary" href="/admin.html">See the register</a>
+        <button type="button" class="btn btn-quiet" id="again">Import another</button>
+      </div>
+    </div>`;
 
-async function start() {
-  try {
-    const { projects } = await api('/api/me');
-    const remembered = localStorage.getItem('fmr.project');
-    state.projectId = projects.find((p) => p.projectId === remembered)?.projectId
-      ?? projects[0]?.projectId;
+  $('again').onclick = () => renderDrop();
+}
 
-    $('project').innerHTML = projects
-      .map((p) => `<option value="${p.projectId}"${p.projectId === state.projectId ? ' selected' : ''}>${esc(p.name)}</option>`)
-      .join('');
-
+await initShell({
+  current: 'import',
+  onProjectChange: async () => {
+    // A staged batch belongs to the project it was uploaded against, so
+    // switching projects abandons the review. Ask before it disappears, and
+    // refuse the switch if the answer is no.
+    if (state.batch) {
+      const sure = await confirmAction({
+        title: 'Leave this review?',
+        lede: state.batch.sourceName,
+        body: '<p class="dim">The file stays staged on the other project, but this ' +
+              'page has no way back to it. You would need to upload it again.</p>',
+        confirmLabel: 'Leave it',
+        danger: true
+      });
+      if (!sure) return false;
+    }
+    state.batch = null;
+    state.extraction = null;
     renderDrop();
-  } catch {
-    location.href = '/signin.html';
   }
-}
+});
 
-start();
+renderDrop();
