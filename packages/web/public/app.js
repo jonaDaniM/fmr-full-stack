@@ -10,13 +10,15 @@
  */
 
 import { api, idempotencyKey } from './lib/api.js';
-import { $, esc, n } from './lib/dom.js';
+import { $, esc, n, when } from './lib/dom.js';
 import { dialog } from './lib/modal.js';
-import { toast, toastSticky } from './lib/toast.js';
-import { initShell } from './lib/shell.js';
+import { toast, toastError, toastSticky } from './lib/toast.js';
+import { initShell, session } from './lib/shell.js';
 import { ceilingFor } from './lib/ceilings.js';
 
-const state = { results: [], searching: false, locked: null };
+// filters: what has been typed into each FMR's filter box, by fmrId. Kept
+// here rather than read off the DOM so a re-render does not lose it.
+const state = { results: [], searching: false, locked: null, filters: new Map() };
 
 // --- actions available on a line ------------------------------------------
 
@@ -28,6 +30,12 @@ const ACTION_LABELS = {
   ISSUE_FROM_BAG: 'Issue from bag',
   BACKORDER_REQUESTED: 'Backorder'
 };
+
+/** What a recorded movement is called when a crew reads it back. */
+const movementLabel = (type) => ACTION_LABELS[type]
+  ?? (type.startsWith('CORRECTION_')
+    ? `Undone: ${(ACTION_LABELS[type.slice(11)] ?? type.slice(11)).toLowerCase()}`
+    : type);
 
 const NEEDS = {
   CONFIRM_AVAILABLE: ['quantity', 'storageLocation'],
@@ -93,8 +101,8 @@ function renderCard(line) {
   return `<article class="card" data-line="${esc(line.id)}">
     <div class="card-head">
       <div class="card-top">
-        <span class="fmr">${esc(line.fmrNumber)}</span>
-        <span class="iso">${esc(line.isoNumber)} sht ${esc(line.isoSheet)} &middot; line ${esc(line.lineNumber)}</span>
+        <span class="ln">Line ${esc(line.lineNumber)}</span>
+        <span class="iso">${esc(line.isoNumber)} sht ${esc(line.isoSheet)}</span>
         <span class="${statusPill(line.status)}">${esc(line.status)}</span>
       </div>
       <div class="desc">${esc(line.description ?? '')}</div>
@@ -123,8 +131,116 @@ function renderCard(line) {
         `<button type="button" data-action="${action}"
                  class="btn ${i === 0 ? 'btn-primary' : ''}">${ACTION_LABELS[action]}</button>`
       ).join('') || '<span class="dim">Nothing outstanding on this line.</span>'}
+      <button type="button" class="btn btn-quiet act-history"
+              data-history="${esc(line.id)}">History</button>
     </div>
   </article>`;
+}
+
+/**
+ * Group the flat result list back into the FMRs it came from.
+ *
+ * Search returns lines; a crew thinks in requisitions. Eight lines of one FMR
+ * repeated its number eight times and gave no way to narrow a long one — a
+ * 60-line FMR meant scrolling 60 cards to find one item.
+ */
+function groupByFmr(lines) {
+  const groups = new Map();
+
+  for (const line of lines) {
+    const key = line.fmrId ?? line.fmrNumber;
+    if (!groups.has(key)) {
+      groups.set(key, {
+        fmrId: line.fmrId,
+        fmrNumber: line.fmrNumber,
+        isoNumber: line.isoNumber,
+        isoSheet: line.isoSheet,
+        priority: line.priority,
+        dateRequired: line.dateRequired,
+        lines: []
+      });
+    }
+    groups.get(key).lines.push(line);
+  }
+
+  // One drawing across the whole FMR is worth naming in the header; several
+  // means the header cannot speak for them, so the line rows carry it.
+  for (const group of groups.values()) {
+    const drawings = new Set(group.lines.map((l) => `${l.isoNumber} sht ${l.isoSheet}`));
+    group.drawing = drawings.size === 1 ? [...drawings][0] : `${drawings.size} drawings`;
+    group.totals = group.lines.reduce(
+      (acc, l) => ({
+        requested: acc.requested + Number(l.quantities.requested ?? 0),
+        issued: acc.issued + Number(l.quantities.issued ?? 0),
+        remaining: acc.remaining + Number(l.quantities.remaining ?? 0)
+      }),
+      { requested: 0, issued: 0, remaining: 0 }
+    );
+    group.totals.fulfillmentPct = group.totals.requested > 0
+      ? Math.round((group.totals.issued / group.totals.requested) * 100)
+      : 0;
+  }
+
+  return [...groups.values()];
+}
+
+/** Does this line match what was typed into an FMR's filter box? */
+function lineMatches(line, term) {
+  if (!term) return true;
+  const haystack = [
+    line.description, line.commodityCode, line.size, line.lineNumber,
+    line.isoNumber, line.isoSheet, line.status,
+    ...(line.activeBags ?? []).map((bag) => bag.tagNumber)
+  ].join(' ').toLowerCase();
+  return haystack.includes(term.toLowerCase());
+}
+
+function renderGroup(group) {
+  const term = state.filters.get(group.fmrId) ?? '';
+  const shown = group.lines.filter((line) => lineMatches(line, term));
+  const t = group.totals;
+
+  const body = shown.length
+    ? shown.map(renderCard).join('')
+    : `<p class="no-match">Nothing in this FMR matches
+         &ldquo;${esc(term)}&rdquo;.</p>`;
+
+  // The filter only earns its space on an FMR long enough to need narrowing.
+  const filter = group.lines.length > 3
+    ? `<div class="fmr-tools">
+         <label class="vh" for="filter-${esc(group.fmrId)}">Filter this FMR</label>
+         <input class="fmr-filter" type="search" id="filter-${esc(group.fmrId)}"
+                data-filter-for="${esc(group.fmrId)}" value="${esc(term)}"
+                autocomplete="off" placeholder="Filter these lines">
+         <span class="fmr-count">${shown.length === group.lines.length
+           ? `${group.lines.length} lines`
+           : `${shown.length} of ${group.lines.length}`}</span>
+       </div>`
+    : '';
+
+  return `<section class="fmr-group" data-fmr="${esc(group.fmrId)}">
+    <header class="fmr-head">
+      <div class="fmr-id">
+        <h2>${esc(group.fmrNumber)}</h2>
+        <span class="fmr-drawing">${esc(group.drawing)}</span>
+      </div>
+      <div class="fmr-fill">
+        <span class="fill-n">${Number(t.fulfillmentPct)}%</span>
+        <span class="fill-l">issued</span>
+        <div class="fill-bar" role="img"
+             aria-label="${Number(t.fulfillmentPct)}% of this FMR issued">
+          <i style="width:${Number(t.fulfillmentPct)}%"></i>
+        </div>
+      </div>
+      <dl class="fmr-tot">
+        <div><dt>Requested</dt><dd>${n(t.requested)}</dd></div>
+        <div><dt>Issued</dt><dd>${n(t.issued)}</dd></div>
+        <div><dt>Remaining</dt><dd>${n(t.remaining)}</dd></div>
+      </dl>
+      ${filter}
+    </header>
+    ${body}
+  </section>`;
 }
 
 function renderResults() {
@@ -141,7 +257,27 @@ function renderResults() {
   }
 
   hint.hidden = true;
-  container.innerHTML = state.results.map(renderCard).join('');
+  container.innerHTML = groupByFmr(state.results).map(renderGroup).join('');
+}
+
+/**
+ * Redraw one FMR after its filter changed, leaving the rest of the page alone.
+ *
+ * Re-rendering everything would take focus out of the box being typed into.
+ */
+function renderOneGroup(fmrId) {
+  const group = groupByFmr(state.results).find((g) => g.fmrId === fmrId);
+  const section = document.querySelector(`.fmr-group[data-fmr="${CSS.escape(fmrId)}"]`);
+  if (!group || !section) return;
+
+  section.outerHTML = renderGroup(group);
+
+  // Put the caret back where it was — the node it was in has been replaced.
+  const box = document.querySelector(`[data-filter-for="${CSS.escape(fmrId)}"]`);
+  if (box) {
+    box.focus();
+    box.setSelectionRange(box.value.length, box.value.length);
+  }
 }
 
 /** A failure looks like a failure, not like an empty result. */
@@ -249,9 +385,77 @@ async function act(line, action) {
   });
 }
 
+/**
+ * Everything recorded against one line, newest first.
+ *
+ * A crew standing at the rack asks "has someone already pulled this?", and
+ * the quantities alone do not say who or when. Corrections appear here as
+ * their own entries with a negative quantity — the record is never rewritten,
+ * so what actually happened stays readable.
+ */
+async function showHistory(lineId) {
+  const line = state.results.find((l) => l.id === lineId);
+
+  let history;
+  try {
+    ({ history } = await api(`/api/lines/${lineId}/history`));
+  } catch (failure) {
+    return toastError(failure.message);
+  }
+
+  const body = history.length
+    ? `<ol class="hist">${renderHistoryEntries(history)}</ol>`
+    : '<div class="empty"><p>Nothing has been recorded against this line yet.</p></div>';
+
+  await dialog({
+    title: 'What happened to this line',
+    lede: line ? `${esc(line.fmrNumber)} · line ${esc(line.lineNumber)} · ${esc(line.description ?? '')}` : '',
+    body,
+    wide: true,
+    confirmLabel: 'Close',
+    cancelLabel: 'Done',
+    onSubmit: () => null
+  });
+}
+
+/** One <li> per recorded movement. */
+function renderHistoryEntries(history) {
+  return history.map((entry) => {
+    const corrected = entry.type.startsWith('CORRECTION_');
+    const detail = [
+      entry.performedBy,
+      entry.issuedTo ? `to ${entry.issuedTo}` : null,
+      entry.storageLocation
+    ].filter(Boolean).join(' · ');
+
+    return `<li class="${corrected ? 'undone' : ''}">
+      <div class="h-top">
+        <span class="h-what">${esc(movementLabel(entry.type))}</span>
+        <span class="h-qty">${n(entry.quantity)} ${esc(entry.uom ?? '')}</span>
+      </div>
+      <div class="h-who">${esc(detail)} &middot; ${when(entry.at)}</div>
+      ${entry.notes ? `<div class="h-note">${esc(entry.notes)}</div>` : ''}
+    </li>`;
+  }).join('');
+}
+
 // --- wiring ----------------------------------------------------------------
 
+// Narrowing one FMR redraws only that FMR, so a filter being typed into keeps
+// focus and the other results on screen do not flicker.
+$('results').addEventListener('input', (event) => {
+  const box = event.target.closest('input[data-filter-for]');
+  if (!box) return;
+
+  const fmrId = box.dataset.filterFor;
+  state.filters.set(fmrId, box.value);
+  renderOneGroup(fmrId);
+});
+
 $('results').addEventListener('click', (event) => {
+  const historyButton = event.target.closest('button[data-history]');
+  if (historyButton) return showHistory(historyButton.dataset.history);
+
   const button = event.target.closest('button[data-action]');
   if (!button) return;
 
@@ -278,6 +482,7 @@ $('searchForm').onsubmit = async (event) => {
   try {
     const { results } = await api(`/api/search?q=${encodeURIComponent(query)}`);
     state.results = results;
+    state.filters.clear();   // they belonged to the results being replaced
     renderResults();
   } catch (failure) {
     renderSearchError(failure.message);
@@ -320,6 +525,7 @@ await initShell({
   current: 'field',
   onProjectChange: () => {
     state.results = [];
+    state.filters.clear();
     $('results').innerHTML = '';
     const hint = $('hint');
     hint.className = 'hint';
@@ -329,4 +535,19 @@ await initShell({
   }
 });
 
-await loadOptions();
+/**
+ * Someone with no project membership had a working-looking search box that
+ * failed on every query. Say so before they type, not after — the page
+ * already knows, because the shell told it.
+ */
+if (!session.projectId) {
+  $('searchForm').hidden = true;
+  const hint = $('hint');
+  hint.className = 'empty';
+  hint.innerHTML = `<h2>No project yet</h2>
+    <p>This account is not on a project, so there is nothing to search.
+       An owner can add you from the Owner screen.</p>`;
+  hint.hidden = false;
+} else {
+  await loadOptions();
+}

@@ -1,9 +1,9 @@
 /**
  * Office interface.
  *
- * Three views: the backorder queue the expeditor works from, a register of
- * every FMR, and a roll-up by drawing. Denser than the field screen — this
- * one is read at a desk.
+ * Four views: today's movements and what is waiting, the backorder queue the
+ * expeditor works from, a register of every FMR, and a roll-up by drawing.
+ * Denser than the field screen — this one is read at a desk.
  */
 
 import { api, idempotencyKey } from './lib/api.js';
@@ -12,7 +12,7 @@ import { dialog, confirmAction } from './lib/modal.js';
 import { toast, toastError } from './lib/toast.js';
 import { initShell } from './lib/shell.js';
 
-const state = { tab: 'queue', filter: 'Pending', data: null, filters: null };
+const state = { tab: 'today', filter: 'Pending', data: null, filters: null };
 
 // --- backorder queue -------------------------------------------------------
 
@@ -223,9 +223,73 @@ const renderRegisterRow = (f) => `
       <span class="vh">${esc(f.fulfillmentPct)}% fulfilled</span>
     </td>
     <td><div class="rowacts">
+      <button type="button" class="btn btn-sm" data-open="${esc(f.id)}">Open</button>
       <button type="button" class="btn btn-sm" data-renumber="${esc(f.id)}">Renumber</button>
     </div></td>
   </tr>`;
+
+/**
+ * Everything on one FMR, without leaving the register.
+ *
+ * The register says how much of an FMR is outstanding but not which lines are
+ * holding it up. FMRv3 opened the same detail inline from its register row;
+ * the endpoint was ported and then had nothing calling it.
+ */
+async function openFmr(fmrId) {
+  let fmr;
+  try {
+    fmr = await api(`/api/fmr/${fmrId}`);
+  } catch (failure) {
+    return toastError(failure.message);
+  }
+
+  const rows = renderFmrLineRows(fmr.lines);
+
+  await dialog({
+    title: fmr.fmrNumber,
+    lede: [
+      fmr.iwpNumber ? `IWP ${fmr.iwpNumber}` : null,
+      fmr.requestedBy ? `requested by ${fmr.requestedBy}` : null,
+      fmr.status,
+      `${Number(fmr.totals.fulfillmentPct)}% issued`
+    ].filter(Boolean).join(' · '),
+    wide: true,
+    body: `<div class="tw"><table>
+        <thead><tr>
+          <th class="col-tiny">Line</th><th class="col-md">Drawing</th><th class="col-grow">Material</th>
+          <th class="num col-sm">Requested</th><th class="num col-sm">Available</th>
+          <th class="num col-sm">Bagged</th><th class="num col-sm">Issued</th>
+          <th class="num col-sm">Remaining</th><th class="col-md">Status</th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+      </table></div>`,
+    confirmLabel: 'Close',
+    cancelLabel: 'Done',
+    onSubmit: () => null
+  });
+}
+
+/** One row per line of an FMR, for the detail dialog. */
+function renderFmrLineRows(lines) {
+  if (!lines.length) return emptyRow(9, 'This FMR has no active lines.');
+
+  return lines.map((l) => {
+    const q = l.quantities;
+    const bags = (l.activeBags ?? []).map((b) => b.tagNumber).join(', ');
+    return `<tr>
+      <td class="num">${esc(l.lineNumber)}</td>
+      <td class="mono">${esc(l.isoNumber)}<span class="dim"> sht ${esc(l.isoSheet)}</span></td>
+      <td>${esc(l.description ?? '')}
+          <div class="dim">${esc(l.commodityCode ?? '')} &middot; ${esc(l.size ?? '')}</div></td>
+      <td class="num">${n(q.requested)}</td>
+      <td class="num">${n(q.available)}</td>
+      <td class="num">${n(q.bagged)}${bags ? `<div class="dim">${esc(bags)}</div>` : ''}</td>
+      <td class="num">${n(q.issued)}</td>
+      <td class="num">${n(q.remaining)}</td>
+      <td>${esc(l.status)}</td>
+    </tr>`;
+  }).join('');
+}
 
 /**
  * Rename a published FMR.
@@ -291,10 +355,96 @@ async function renderIso() {
     </table></div>`;
 }
 
+// --- today -----------------------------------------------------------------
+
+/** What each transaction type is called when a person reads it back. */
+const MOVEMENT_LABELS = {
+  CONFIRM_AVAILABLE: 'Confirmed found',
+  BAG: 'Bagged',
+  DIRECT_ISSUE: 'Issued direct',
+  ISSUE_FROM_AVAILABLE: 'Issued',
+  ISSUE_FROM_BAG: 'Issued from bag',
+  BACKORDER_REQUESTED: 'Backorders raised'
+};
+
+const movementLabel = (type) => MOVEMENT_LABELS[type]
+  ?? (type.startsWith('CORRECTION_')
+    ? `Corrected ${(MOVEMENT_LABELS[type.slice(11)] ?? type.slice(11)).toLowerCase()}`
+    : type);
+
+/**
+ * The shift in one screen.
+ *
+ * FMRv3 opened the admin view on a KPI panel; the port had queues but no
+ * headline, so an expeditor could not tell whether anything had moved today
+ * without reading the register.
+ */
+async function renderToday() {
+  const data = await api('/api/dashboard');
+
+  const pending = data.backorders?.Pending ?? { count: 0, quantity: 0 };
+  const returned = data.backorders?.['Returned for Review'] ?? { count: 0, quantity: 0 };
+  const bags = data.activeBags ?? { count: 0, quantity: 0 };
+
+  const movements = Object.entries(data.last24h ?? {})
+    .sort(([, a], [, b]) => b.count - a.count);
+  const moved = movements.reduce((total, [, v]) => total + v.count, 0);
+
+  // Pending work is the number an expeditor is answerable for, so it leads and
+  // is the only tile that changes colour when it is not zero.
+  $('view').innerHTML = `
+    <div class="stats">
+      <div class="stat${pending.count ? ' stat-warn' : ''}">
+        <span class="n">${n(pending.count)}</span>
+        <span class="l">Awaiting your decision</span>
+        <span class="s">${n(pending.quantity)} on backorder</span>
+      </div>
+      <div class="stat">
+        <span class="n">${n(returned.count)}</span>
+        <span class="l">Returned to the crew</span>
+        <span class="s">${n(returned.quantity)} outstanding</span>
+      </div>
+      <div class="stat">
+        <span class="n">${n(bags.count)}</span>
+        <span class="l">Bags holding material</span>
+        <span class="s">${n(bags.quantity)} reserved</span>
+      </div>
+      <div class="stat">
+        <span class="n">${n(moved)}</span>
+        <span class="l">Movements today</span>
+        <span class="s">last 24 hours</span>
+      </div>
+    </div>
+
+    <h2 class="sec">What the crews did today</h2>
+    ${movements.length
+      ? `<div class="tw"><table>
+          <thead><tr><th>Movement</th><th class="num">Times</th><th class="num">Quantity</th></tr></thead>
+          <tbody>${movements.map(([type, v]) => `
+            <tr>
+              <td>${esc(movementLabel(type))}</td>
+              <td class="num">${n(v.count)}</td>
+              <td class="num">${n(v.quantity)}</td>
+            </tr>`).join('')}
+          </tbody>
+        </table></div>`
+      : `<div class="empty">
+           <h2>Nothing moved today</h2>
+           <p>No material has been located, bagged or issued in the last 24 hours.</p>
+         </div>`}`;
+}
+
 // --- wiring ----------------------------------------------------------------
 
-const VIEWS = { queue: renderQueue, register: renderRegister, iso: renderIso };
-const SKELETONS = { queue: { stats: 4, rows: 8 }, register: { stats: 4, rows: 10 }, iso: { stats: 1, rows: 10 } };
+const VIEWS = {
+  today: renderToday, queue: renderQueue, register: renderRegister, iso: renderIso
+};
+const SKELETONS = {
+  today: { stats: 4, rows: 6 },
+  queue: { stats: 4, rows: 8 },
+  register: { stats: 4, rows: 10 },
+  iso: { stats: 1, rows: 10 }
+};
 
 async function show() {
   // A skeleton in the shape of what is coming, rather than a blank page.
@@ -329,6 +479,9 @@ $('view').addEventListener('click', (event) => {
     state.filter = filter.dataset.filter;
     return show();
   }
+
+  const openButton = event.target.closest('button[data-open]');
+  if (openButton) return openFmr(openButton.dataset.open);
 
   const renumberButton = event.target.closest('button[data-renumber]');
   if (renumberButton) {

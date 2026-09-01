@@ -369,6 +369,18 @@ a { color: var(--accent); }
   font-variant-numeric: tabular-nums;
 }
 .stat .l { display: block; margin-top: 3px; }
+/* The quantity behind the count: a tile says "4 requests" and this says how
+   much material that is, which is the number that decides urgency. */
+.stat .s {
+  display: block; margin-top: 2px;
+  font-size: var(--t-sm); color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+/* A heading between blocks within one view. */
+.sec {
+  margin: var(--s-5) 0 var(--s-3);
+  font-family: var(--font-display); font-size: var(--t-lg); font-weight: 600;
+}
 .stat-warn .n { color: var(--warn); }
 .stat-danger .n { color: var(--danger); }
 .stat-ok .n { color: var(--accent); }
@@ -610,8 +622,116 @@ button.issue:hover { filter: brightness(0.97); }
 
 .list { display: flex; flex-direction: column; gap: var(--s-3); padding: 0 var(--s-4) var(--s-6); }
 
+/* What happened to a line, newest first. A correction is not deleted from the
+   record, so it appears as its own entry and is marked rather than hidden. */
+.hist { margin: 0; padding: 0; list-style: none; }
+.hist li {
+  padding: var(--s-3) 0;
+  border-bottom: 1px solid var(--rule);
+}
+.hist li:last-child { border-bottom: 0; }
+.hist .h-top {
+  display: flex; align-items: baseline; gap: var(--s-3);
+  justify-content: space-between;
+}
+.hist .h-what { font-weight: 600; }
+.hist .h-qty {
+  font-family: var(--font-display); font-weight: 600;
+  font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+.hist .h-who { margin-top: 2px; font-size: var(--t-sm); color: var(--muted); }
+.hist .h-note { margin-top: 4px; font-size: var(--t-sm); }
+.hist .undone .h-what,
+.hist .undone .h-qty { color: var(--warn); }
+
+/* History is a reference, not the job — it sits apart from the action row. */
+.acts .act-history { margin-left: auto; }
+
+/* Results group under the FMR they belong to: the crew is working a
+   requisition, not a list of unrelated lines. The group carries the identity
+   and the totals, so each line below it only has to carry itself. */
+.fmr-group + .fmr-group { margin-top: var(--s-5); }
+
+.fmr-head {
+  display: grid; gap: var(--s-3);
+  grid-template-columns: 1fr auto;
+  align-items: start;
+  padding: var(--s-4);
+  background: var(--card);
+  border: 1px solid var(--rule-2);
+  border-radius: var(--r-lg) var(--r-lg) 0 0;
+  border-bottom-width: 2px;
+}
+.fmr-id h2 {
+  margin: 0; font-family: var(--font-display);
+  font-size: var(--t-xl); font-weight: 700;
+  font-variant-numeric: tabular-nums; letter-spacing: -0.01em;
+}
+.fmr-drawing {
+  display: block; margin-top: 2px;
+  font-size: var(--t-sm); color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* How much of this requisition is done, as a figure and as a bar. */
+.fmr-fill { text-align: right; }
+.fmr-fill .fill-n {
+  font-family: var(--font-display); font-size: var(--t-xl);
+  font-weight: 700; font-variant-numeric: tabular-nums; color: var(--accent);
+}
+.fmr-fill .fill-l {
+  margin-left: 4px; font-size: var(--t-sm); color: var(--muted);
+}
+.fill-bar {
+  margin-top: 5px; width: 92px; height: 5px;
+  background: var(--rule-2); border-radius: 999px; overflow: hidden;
+}
+.fill-bar i { display: block; height: 100%; background: var(--accent); }
+
+.fmr-tot {
+  grid-column: 1 / -1; margin: 0;
+  display: flex; gap: var(--s-5); flex-wrap: wrap;
+}
+.fmr-tot div { display: flex; align-items: baseline; gap: 6px; }
+.fmr-tot dt { font-size: var(--t-sm); color: var(--muted); }
+.fmr-tot dd {
+  margin: 0; font-family: var(--font-display); font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Narrowing a long FMR without leaving the screen. */
+.fmr-tools {
+  grid-column: 1 / -1;
+  display: flex; align-items: center; gap: var(--s-3);
+}
+.fmr-filter {
+  flex: 1; min-width: 0; font: inherit; height: var(--control-h);
+  padding: 0 var(--s-3);
+  background: var(--ground); color: var(--ink);
+  border: 1px solid var(--rule-2); border-radius: var(--r-md);
+}
+.fmr-count {
+  font-size: var(--t-sm); color: var(--muted);
+  font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+.no-match {
+  margin: 0; padding: var(--s-5) var(--s-4);
+  text-align: center; color: var(--muted); font-size: var(--t-sm);
+  background: var(--card);
+  border: 1px solid var(--rule-2); border-top: 0;
+  border-radius: 0 0 var(--r-lg) var(--r-lg);
+}
+
+/* Inside a group the cards read as one stack, not as separate objects. */
+.fmr-group .card { border-radius: 0; border-top: 0; }
+.fmr-group .card + .card { margin-top: 0; }
+.fmr-group .card:last-child { border-radius: 0 0 var(--r-lg) var(--r-lg); }
+
 .card-top { display: flex; align-items: baseline; gap: var(--s-2); flex-wrap: wrap; }
-.card-top .fmr { font-family: var(--font-display); font-weight: 700; font-variant-numeric: tabular-nums; }
+.card-top .ln {
+  font-family: var(--font-display); font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
 .card-top .iso { font-size: var(--t-sm); color: var(--muted); font-variant-numeric: tabular-nums; }
 .card-top .pill { margin-left: auto; }
 .desc { margin-top: 5px; font-size: var(--t-md); }
