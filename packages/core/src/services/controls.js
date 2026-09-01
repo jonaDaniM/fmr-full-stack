@@ -11,6 +11,7 @@
 
 import { withTransaction } from '../db/pool.js';
 import { LedgerError } from '../domain/ledger.js';
+import { formatBagTagNumber } from '../domain/bagTag.js';
 
 /** Current controls, defaulting to open. */
 export async function getControls(client, projectId) {
@@ -125,6 +126,54 @@ export async function setControls(ctx, { fieldLocked, importLocked, reason }) {
       lockedAt: rows[0].locked_at
     };
   });
+}
+
+/**
+ * Take the next bag tag number for a project.
+ *
+ * FMRv3 did this (FieldService.gs:731) and the crew never typed a tag number.
+ * Requiring one by hand is slow in gloves and invites the duplicate the
+ * UNIQUE constraint then rejects — after the typing.
+ *
+ * Must be called inside the bagging transaction: the row lock is what stops
+ * two crews bagging at the same moment from taking the same number. The
+ * counter advances even if the surrounding transaction later rolls back,
+ * which is the right trade — a gap in the numbering is harmless, a reused
+ * number is not.
+ *
+ * The sequence restarts each calendar year, matching the BT-2025-00001 shape.
+ */
+export async function nextBagTagNumber(client, projectId) {
+  const year = new Date().getFullYear();
+
+  // Create the row if this project has never had its controls touched, so the
+  // first bagging on a fresh project has a counter to advance.
+  await client.query(
+    `INSERT INTO project_controls (project_id) VALUES ($1)
+     ON CONFLICT (project_id) DO NOTHING`,
+    [projectId]
+  );
+
+  const { rows } = await client.query(
+    `UPDATE project_controls
+        SET tag_sequence = CASE
+              WHEN tag_sequence_year IS DISTINCT FROM $2::integer THEN 2
+              ELSE tag_sequence + 1
+            END,
+            tag_sequence_year = $2::integer
+      WHERE project_id = $1
+      RETURNING tag_prefix,
+                CASE
+                  WHEN tag_sequence_year IS DISTINCT FROM $2::integer THEN 1
+                  ELSE tag_sequence - 1
+                END AS allocated`,
+    [projectId, year]
+  );
+
+  const row = rows[0];
+  if (!row) throw new LedgerError('That project was not found.', 'NOT_FOUND');
+
+  return formatBagTagNumber(row.tag_prefix, year, row.allocated);
 }
 
 /**

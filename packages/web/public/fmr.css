@@ -585,6 +585,13 @@ button.issue:hover { filter: brightness(0.97); }
   background: var(--danger); color: var(--danger-ink);
   font-weight: 550;
 }
+/* Carries a number to copy onto a bag, so it is sized to be read at arm's
+   length and its digits align. */
+.toast-sticky {
+  background: var(--accent); color: var(--accent-ink);
+  font-weight: 600; font-size: var(--t-md);
+  font-variant-numeric: tabular-nums;
+}
 @media (prefers-reduced-motion: no-preference) {
   .toast { animation: rise 0.18s ease-out; }
   @keyframes rise { from { opacity: 0; transform: translateY(8px); } }

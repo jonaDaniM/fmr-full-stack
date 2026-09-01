@@ -9,7 +9,10 @@
  */
 
 const STACK_ID = 'toast-stack';
-const LIFETIME = { ok: 3200, error: 6000 };
+// "sticky" is for a message carrying something the reader has to copy down —
+// an assigned bag tag number, which has to get onto the bag in marker pen.
+// Three seconds is not long enough to read a number and write it in gloves.
+const LIFETIME = { ok: 3200, error: 6000, sticky: 15000 };
 
 function stack() {
   let node = document.getElementById(STACK_ID);
@@ -46,3 +49,6 @@ export const toast = (message) => push(message, 'ok');
 
 /** Something did not. Stays longer, because it needs reading. */
 export const toastError = (message) => push(message, 'error');
+
+/** Something worked and left a number to copy down. Stays until read or tapped. */
+export const toastSticky = (message) => push(message, 'sticky');
