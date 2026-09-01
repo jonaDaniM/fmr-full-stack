@@ -1,0 +1,253 @@
+/**
+ * HTTP API.
+ *
+ * Deliberately small: node:http plus a route table. The interesting rules all
+ * live in the domain layer, and this file's job is only to authenticate the
+ * caller, check they may do the thing, and hand off.
+ */
+
+import http from 'node:http';
+import { readFile } from 'node:fs/promises';
+import { join, extname, normalize } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { dirname } from 'node:path';
+import { pool } from '../../core/src/db/pool.js';
+import { LedgerError } from '../../core/src/domain/ledger.js';
+import { performFieldAction } from '../../core/src/services/field.js';
+import {
+  getBackorderQueue, decideBackorder
+} from '../../core/src/services/backorderReview.js';
+import { searchLines, getFmrDetail } from '../../core/src/services/search.js';
+import {
+  authenticate, require as requirePermission, verifyGoogleToken,
+  findUser, recordLogin, issueSession, readSession, membershipsFor, AuthError
+} from './auth.js';
+import { once, IdempotencyConflict } from './idempotency.js';
+
+const json = (res, status, body) => {
+  const payload = JSON.stringify(body);
+  res.writeHead(status, {
+    'content-type': 'application/json',
+    'content-length': Buffer.byteLength(payload)
+  });
+  res.end(payload);
+};
+
+async function readBody(req) {
+  const chunks = [];
+  let size = 0;
+  for await (const chunk of req) {
+    size += chunk.length;
+    if (size > 1_000_000) throw new LedgerError('Request too large.', 'TOO_LARGE');
+    chunks.push(chunk);
+  }
+  if (!chunks.length) return {};
+  try {
+    return JSON.parse(Buffer.concat(chunks).toString());
+  } catch {
+    throw new LedgerError('Request body is not valid JSON.', 'BAD_JSON');
+  }
+}
+
+const routes = [];
+const route = (method, pattern, handler) =>
+  routes.push({ method, pattern, handler });
+
+// --- sign in ---------------------------------------------------------------
+
+route('POST', /^\/api\/auth\/google$/, async (req, res) => {
+  const { idToken } = await readBody(req);
+  if (!idToken) throw new AuthError('No sign-in token supplied.', 400);
+
+  const claims = await verifyGoogleToken(idToken);
+  const user = await findUser(claims.email);
+
+  // Accounts are provisioned by an admin. An unknown Google account is not
+  // an error to explain in detail — just no.
+  if (!user) throw new AuthError('This account has not been set up. Ask your administrator.', 403);
+
+  await recordLogin(user.id);
+  const token = issueSession(user);
+  const projects = await membershipsFor(user.id);
+
+  res.setHeader(
+    'set-cookie',
+    `fmr_session=${token}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=43200`
+  );
+
+  json(res, 200, {
+    user: { id: user.id, email: user.email, name: user.display_name },
+    projects
+  });
+});
+
+route('POST', /^\/api\/auth\/signout$/, async (_req, res) => {
+  res.setHeader('set-cookie', 'fmr_session=; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=0');
+  json(res, 200, { ok: true });
+});
+
+route('GET', /^\/api\/me$/, async (req, res) => {
+  const session = readSession(req.headers.cookie);
+  if (!session) throw new AuthError('Please sign in.');
+
+  const { rows } = await pool.query('SELECT * FROM users WHERE id = $1 AND active', [session.sub]);
+  if (!rows[0]) throw new AuthError('This account is no longer active.');
+
+  json(res, 200, {
+    user: { id: rows[0].id, email: rows[0].email, name: rows[0].display_name },
+    projects: await membershipsFor(rows[0].id)
+  });
+});
+
+// --- field -----------------------------------------------------------------
+
+route('GET', /^\/api\/search$/, async (req, res, { url }) => {
+  const ctx = await authenticate(req);
+  requirePermission(ctx, 'search');
+
+  const client = await pool.connect();
+  try {
+    const result = await searchLines(client, ctx.projectId, {
+      query: url.searchParams.get('q'),
+      mode: (url.searchParams.get('mode') || 'AUTO').toUpperCase(),
+      limit: Math.min(Number(url.searchParams.get('limit')) || 200, 500)
+    });
+    json(res, 200, result);
+  } finally {
+    client.release();
+  }
+});
+
+route('GET', /^\/api\/fmr\/([0-9a-f-]{36})$/, async (req, res, { match }) => {
+  const ctx = await authenticate(req);
+  requirePermission(ctx, 'search');
+
+  const client = await pool.connect();
+  try {
+    const detail = await getFmrDetail(client, ctx.projectId, match[1]);
+    if (!detail) return json(res, 404, { error: 'FMR not found.' });
+    json(res, 200, detail);
+  } finally {
+    client.release();
+  }
+});
+
+route('POST', /^\/api\/field\/action$/, async (req, res) => {
+  const ctx = await authenticate(req);
+  requirePermission(ctx, 'fieldTransact');
+
+  const body = await readBody(req);
+  const result = await once(
+    req.headers['idempotency-key'],
+    ctx.user,
+    body,
+    () => performFieldAction(ctx, body)
+  );
+
+  json(res, 200, result);
+});
+
+// --- admin -----------------------------------------------------------------
+
+route('GET', /^\/api\/backorders$/, async (req, res, { url }) => {
+  const ctx = await authenticate(req);
+  requirePermission(ctx, 'adminBackorder');
+
+  const client = await pool.connect();
+  try {
+    const queue = await getBackorderQueue(client, ctx.projectId, {
+      status: url.searchParams.get('status') || undefined
+    });
+    json(res, 200, { requests: queue });
+  } finally {
+    client.release();
+  }
+});
+
+route('POST', /^\/api\/backorders\/decide$/, async (req, res) => {
+  const ctx = await authenticate(req);
+  requirePermission(ctx, 'adminBackorder');
+
+  const body = await readBody(req);
+  const result = await once(
+    req.headers['idempotency-key'],
+    ctx.user,
+    body,
+    () => decideBackorder(ctx, body)
+  );
+
+  json(res, 200, result);
+});
+
+route('GET', /^\/api\/health$/, async (_req, res) => {
+  await pool.query('SELECT 1');
+  json(res, 200, { ok: true });
+});
+
+// --- dispatch --------------------------------------------------------------
+
+// --- static files ----------------------------------------------------------
+
+const webRoot = join(dirname(fileURLToPath(import.meta.url)), '../../web/public');
+
+const MIME = {
+  '.html': 'text/html; charset=utf-8',
+  '.js': 'text/javascript; charset=utf-8',
+  '.css': 'text/css; charset=utf-8',
+  '.svg': 'image/svg+xml',
+  '.ico': 'image/x-icon'
+};
+
+async function serveStatic(pathname, res) {
+  // normalize() collapses any ../ before it can escape the web root.
+  const rel = normalize(pathname === '/' ? '/index.html' : pathname).replace(/^(\.\.[/\\])+/, '');
+  const file = join(webRoot, rel);
+  if (!file.startsWith(webRoot)) return false;
+
+  try {
+    const body = await readFile(file);
+    res.writeHead(200, {
+      'content-type': MIME[extname(file)] ?? 'application/octet-stream',
+      'cache-control': 'no-cache'
+    });
+    res.end(body);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+const server = http.createServer(async (req, res) => {
+  const url = new URL(req.url, `http://${req.headers.host}`);
+
+  if (req.method === 'GET' && !url.pathname.startsWith('/api/')) {
+    if (await serveStatic(url.pathname, res)) return;
+  }
+
+  const matched = routes
+    .map((r) => ({ ...r, match: url.pathname.match(r.pattern) }))
+    .find((r) => r.match && r.method === req.method);
+
+  if (!matched) return json(res, 404, { error: 'Not found.' });
+
+  try {
+    await matched.handler(req, res, { url, match: matched.match });
+  } catch (error) {
+    if (error instanceof AuthError) {
+      return json(res, error.status, { error: error.message });
+    }
+    if (error instanceof IdempotencyConflict) {
+      return json(res, error.status, { error: error.message });
+    }
+    if (error instanceof LedgerError) {
+      // A rule was broken — the crew needs to know which, in their words.
+      return json(res, 422, { error: error.message, code: error.code });
+    }
+
+    console.error(error);
+    json(res, 500, { error: 'Something went wrong. Try again.' });
+  }
+});
+
+const port = Number(process.env.PORT ?? 3000);
+server.listen(port, () => console.log(`fmr api listening on ${port}`));

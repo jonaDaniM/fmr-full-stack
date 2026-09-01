@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>FMR Field</title>
+<link rel="stylesheet" href="/app.css">
+</head>
+<body>
+<header class="topbar">
+  <span class="brand">FMR Field</span>
+  <span class="project">
+    <select id="project" aria-label="Project"></select>
+  </span>
+</header>
+
+<form class="searchbar" id="searchForm">
+  <input id="q" type="search" inputmode="search" autocomplete="off"
+         placeholder="FMR number or ISO drawing" aria-label="Search">
+  <button type="submit">Search</button>
+</form>
+
+<p class="hint" id="hint">Search by FMR number (FMR-2026-0417) or drawing (D-4410-01).</p>
+<div class="list" id="results"></div>
+
+<script src="/app.js"></script>
+</body>
+</html>
