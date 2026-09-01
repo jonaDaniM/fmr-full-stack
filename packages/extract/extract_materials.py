@@ -82,8 +82,23 @@ DEFAULT_PROFILE: dict[str, Any] = {
     "y_tolerance": 3.0,
 }
 
-IDENT_RE = re.compile(r"^(PS[\-A-Z0-9]*|[A-Z]{0,3}\d{5,}[A-Z0-9]*|C[A-Z0-9]{6,})$", re.I)
-QTY_RE = re.compile(r"^\d+(\.\d+)?$")
+# What a commodity code looks like. Projects number parts differently, so this
+# covers the shapes seen so far: a support tag (PS-12), a long numeric ident
+# (5368751), a catalogue code (C-ABC123), and the dash-segmented pattern used
+# for pipe supports on Fluor drawings (5CH-02-50, 5UGSP-02-50, 5MS24-06).
+IDENT_RE = re.compile(
+    r"^(PS[\-A-Z0-9]*"
+    r"|[A-Z]{0,3}\d{5,}[A-Z0-9]*"
+    r"|C[A-Z0-9]{6,}"
+    r"|\d[A-Z]{1,6}\d*(-[A-Z0-9]+)+"
+    r"|\d[A-Z]{1,6}\d*[A-Z]?\d*[A-Z]?)$",
+    re.I,
+)
+
+# A quantity may carry a foot mark — pipe is taken off by length, and 29.5'
+# means 29.5 feet, not a stray apostrophe. Dropping it here would lose the
+# measurement and read the row as having no quantity at all.
+QTY_RE = re.compile(r"^\d+(\.\d+)?['′]?$")
 ITEM_RE = re.compile(r"^\d{1,3}$")
 
 
@@ -214,18 +229,48 @@ def detect_columns(line: Line, aliases: dict[str, str]) -> dict[str, float]:
     return columns
 
 
-def column_ranges(columns: dict[str, float], page_width: float) -> dict[str, tuple[float, float]]:
+def column_ranges(columns: dict[str, float], page_width: float,
+                  body: list["Line"] | None = None) -> dict[str, tuple[float, float]]:
     """Turn column left-edges into the span each column owns.
 
-    A boundary sits halfway between two headings, which is what keeps a long
+    A boundary sits halfway between two headings, which keeps a long
     description from spilling into the next column.
+
+    That midpoint is wrong where a narrow heading sits over a wide column —
+    "NO" above item numbers, with the description starting only a few
+    millimetres to its right. The first word of a description then falls left
+    of the midpoint and is read as part of the item number, and the row is
+    discarded for having no item number at all. So where the rows themselves
+    are available, prefer a boundary drawn through the widest gap between
+    words that actually appears between the two headings.
     """
     ordered = sorted(columns.items(), key=lambda item: item[1])
     ranges: dict[str, tuple[float, float]] = {}
 
+    def divide(left_x: float, right_x: float) -> float:
+        midpoint = (left_x + right_x) / 2
+        if not body:
+            return midpoint
+
+        # Word starts seen between the two headings, across every body row.
+        starts = sorted({
+            float(w["x0"]) for line in body for w in line.words
+            if left_x <= float(w["x0"]) <= right_x
+        })
+        if len(starts) < 2:
+            return midpoint
+
+        # The widest gap between consecutive starts is the column rule.
+        gap, at = max(
+            ((b - a, (a + b) / 2) for a, b in zip(starts, starts[1:])),
+            default=(0.0, midpoint)
+        )
+        # Only trust it when it is a real gap, not ordinary word spacing.
+        return at if gap > 12 else midpoint
+
     for index, (name, x) in enumerate(ordered):
-        left = 0.0 if index == 0 else (ordered[index - 1][1] + x) / 2
-        right = page_width if index == len(ordered) - 1 else (x + ordered[index + 1][1]) / 2
+        left = 0.0 if index == 0 else divide(ordered[index - 1][1], x)
+        right = page_width if index == len(ordered) - 1 else divide(x, ordered[index + 1][1])
         ranges[name] = (left, right)
 
     return ranges
@@ -248,6 +293,19 @@ def bucket(line: Line, ranges: dict[str, tuple[float, float]]) -> dict[str, str]
 # --- page reading ----------------------------------------------------------
 
 
+# An instrument is identified by its tag, not by a catalogue number: the loop
+# letters are the ISA function codes (FT flow transmitter, PSV relief valve,
+# and so on). Ported from materialScrapper/scripts/extract_instruments.py,
+# which is where this list was worked out against real drawings.
+INSTRUMENT_TAG_RE = re.compile(
+    r"^(?:\d+-)?(?:PDT|PIT|PT|PI|LT|LI|LIT|LG|FT|FI|FIT|FE|TT|TI|TE|"
+    r"XV|ZS|ZSC|ZSO|LSH|LSL|LS|PSV|PCV|FCV|LCV|TCV|FO|FV|LV|HV|TV|"
+    r"PG|TG|LIC|PIC|TIC|FIC|SDV|MOV|AOV|PV|AE|PSE|TDV|VG)"
+    r"-[A-Z0-9]+(?:-[A-Z0-9]+)*$",
+    re.I,
+)
+
+
 def split_ident(cell: str) -> tuple[str, str]:
     """Separate a commodity code from description text sharing its column.
 
@@ -255,8 +313,9 @@ def split_ident(cell: str) -> tuple[str, str]:
     that look like codes stops "Lbs, FF as C" being recorded as a part number.
     """
     tokens = [t for t in str(cell).split() if t]
-    codes = [t for t in tokens if IDENT_RE.match(t)]
-    rest = [t for t in tokens if not IDENT_RE.match(t)]
+    looks_like_code = lambda t: bool(IDENT_RE.match(t) or INSTRUMENT_TAG_RE.match(t))
+    codes = [t for t in tokens if looks_like_code(t)]
+    rest = [t for t in tokens if not looks_like_code(t)]
     return (codes[0] if codes else ""), " ".join(rest).strip()
 
 
@@ -301,6 +360,10 @@ def read_page(page: Any, profile: dict[str, Any], source_pdf: str,
     columns: dict[str, float] = {}
     lines: list[Line] = []
 
+    start_re = re.compile(profile["section_start"], re.I)
+    stop_re = re.compile(profile["section_stop"], re.I)
+    ignore = profile["ignore_anchors"]
+
     for attempt in (profile["crop_from_left"], profile["crop_fallback"]):
         crop = page.crop((width * attempt, 0, width, height))
         words = crop.extract_words(use_text_flow=False, keep_blank_chars=False)
@@ -308,12 +371,40 @@ def read_page(page: Any, profile: dict[str, Any], source_pdf: str,
             continue
 
         lines = cluster_lines(words, profile["y_tolerance"])
-        for line in lines:
+
+        # Find the heading row *inside* the material section, not before it.
+        # A drawing carries other tables — the revision block names NO,
+        # DESCRIPTION and REV, which is enough aliases to be mistaken for the
+        # BOM heading and would swallow the revision history as material.
+        after_start = False
+        for index, line in enumerate(lines):
+            if not after_start:
+                if start_re.search(line.text):
+                    after_start = True
+                continue
+            if stop_re.search(line.text):
+                break
+
             found = detect_columns(line, profile["header_aliases"])
+
+            # Headings are often stacked over two rows — "PT" above "NO",
+            # "NPD" above "(IN)" — so a single row names only some of the
+            # columns and at the wrong x. Fold in the row above and the row
+            # below, keeping the leftmost x for each column, which is where
+            # the values actually start.
+            if found:
+                for neighbour in (index - 1, index + 1):
+                    if not 0 <= neighbour < len(lines):
+                        continue
+                    for name, x in detect_columns(lines[neighbour], profile["header_aliases"]).items():
+                        if name not in found or x < found[name]:
+                            found[name] = x
+
             # A heading row names several columns at once.
             if len(found) >= 3:
                 columns = found
                 break
+
         if columns:
             break
 
@@ -321,12 +412,22 @@ def read_page(page: Any, profile: dict[str, Any], source_pdf: str,
         return [], audit
 
     audit["columns_found"] = True
-    ranges = column_ranges(columns, width)
-    uncertain = len(columns) < 4
 
-    start_re = re.compile(profile["section_start"], re.I)
-    stop_re = re.compile(profile["section_stop"], re.I)
-    ignore = profile["ignore_anchors"]
+    # The rows between the heading and the end of the section, so the column
+    # boundaries can be drawn where the data actually separates.
+    body: list[Line] = []
+    seen_start = False
+    for line in lines:
+        if not seen_start:
+            if start_re.search(line.text):
+                seen_start = True
+            continue
+        if stop_re.search(line.text):
+            break
+        body.append(line)
+
+    ranges = column_ranges(columns, width, body)
+    uncertain = len(columns) < 4
 
     rows: list[Row] = []
     current: Row | None = None
@@ -379,8 +480,13 @@ def read_page(page: Any, profile: dict[str, Any], source_pdf: str,
             ident_cell = cells.get("ident", "")
             description = cells.get("description", "")
             code, spill = split_ident(ident_cell)
-            if spill:
+            # Do not repeat the code in the description. An instrument row
+            # carries its tag in both columns on some sheets, and printing it
+            # twice makes the line read as if it were two different things.
+            if spill and spill != code:
                 description = f"{description} {spill}".strip()
+            if code and description.strip() == code:
+                description = ""
 
             # Likewise a quantity column holding something that is not a
             # number — usually a tag that drifted right.
@@ -424,6 +530,62 @@ def iso_from_name(filename: str, profile: dict[str, Any]) -> str:
     return match.group(1).upper() if match else Path(filename).stem.upper()
 
 
+def iso_from_page(page: Any, profile: dict[str, Any]) -> str:
+    """Read the drawing number off the sheet itself.
+
+    The file name is not reliable: a PDF often holds a whole work package, so
+    its name is the IWP while every sheet inside it is a different drawing.
+
+    A sheet names its neighbours too — "CONT. ON <drawing>" at each break, and
+    the connecting drawings around the border — so simply taking the most
+    frequent number is wrong. A sheet can reference one neighbour more often
+    than itself, and then a whole page of someone else's material is filed
+    under the wrong drawing.
+
+    Position settles it. The drawing's own number is printed in the title
+    block, at the bottom right of the sheet; the references are scattered
+    through the drawing body. So prefer the match nearest the bottom-right
+    corner, and fall back to frequency only when nothing sits there.
+    """
+    pattern = profile.get("iso_on_page")
+    if not pattern:
+        return ""
+
+    compiled = re.compile(pattern, re.I)
+
+    # Words that are a drawing number in their entirety, with where they sit.
+    placed = [
+        (w["text"].upper(), float(w["x0"]), float(w["top"]))
+        for w in page.extract_words()
+        if compiled.fullmatch(str(w["text"]))
+    ]
+
+    if placed:
+        # The title block occupies the bottom right. Rank by how far into that
+        # corner a match sits, measuring both axes as a fraction of the page.
+        width, height = float(page.width), float(page.height)
+        corner = profile.get("title_block", [0.55, 0.80])
+
+        in_block = [
+            (text, x, y) for text, x, y in placed
+            if x >= width * corner[0] and y >= height * corner[1]
+        ]
+        if in_block:
+            # Nearest the corner wins.
+            return max(in_block, key=lambda item: item[1] + item[2])[0]
+
+    # Nothing in the title block — fall back to the most repeated match.
+    text = page.extract_text() or ""
+    found = [value.upper() for value in compiled.findall(text)]
+    if not found:
+        return ""
+
+    counts: dict[str, int] = {}
+    for value in found:
+        counts[value] = counts.get(value, 0) + 1
+    return max(counts.items(), key=lambda kv: kv[1])[0]
+
+
 def read_pdf(path: Path, profile: dict[str, Any]) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     audit = {"pdf": path.name, "pages": 0, "rows": 0, "pages_with_material": 0}
@@ -433,7 +595,10 @@ def read_pdf(path: Path, profile: dict[str, Any]) -> tuple[list[dict[str, Any]],
         with pdfplumber.open(path) as pdf:
             audit["pages"] = len(pdf.pages)
             for number, page in enumerate(pdf.pages, start=1):
-                page_rows, page_audit = read_page(page, profile, path.name, number, iso_number)
+                # Prefer the number printed on the sheet; fall back to the
+                # file name when the drawing does not carry one.
+                page_iso = iso_from_page(page, profile) or iso_number
+                page_rows, page_audit = read_page(page, profile, path.name, number, page_iso)
                 if page_rows:
                     audit["pages_with_material"] += 1
                 rows.extend(row.finalize() for row in page_rows)
