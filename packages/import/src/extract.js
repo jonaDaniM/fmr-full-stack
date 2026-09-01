@@ -25,6 +25,52 @@ const upper = (v) => clean(v).toUpperCase();
  * below, or two cells over when someone merged a column. Look right first,
  * then down.
  */
+
+
+/**
+ * Is this cell another field's label rather than a value?
+ *
+ * Header blocks pack several labelled fields onto one row, so the cell to the
+ * right of "FMR NO." is often "SHT:" rather than the FMR number. A blank
+ * field is better than a wrong one.
+ */
+function looksLikeLabel(value) {
+  const text = String(value).trim();
+  if (/[:=]\s*$/.test(text)) return true;
+  return text.split(/\r?\n/).some((line) => /[:=]\s*$/.test(line.trim()));
+}
+
+/**
+ * Pull a value out of a cell that carries its own label.
+ *
+ * Handles "IWP: ABC-123" on one line and a label with its value on the next
+ * line of the same cell, which is how merged template cells arrive.
+ */
+function matchInline(rawCell, wanted) {
+  if (!rawCell) return null;
+
+  for (const piece of String(rawCell).split(/\r?\n/)) {
+    const text = piece.trim();
+    if (!text) continue;
+
+    const separator = text.match(/^(.+?)\s*[:=]\s*(.+)$/);
+    if (!separator) continue;
+
+    const label = upper(separator[1]).replace(/[:.\s]+$/, '');
+    const value = separator[2].trim();
+    if (value && wanted.includes(label)) return value;
+  }
+
+  // "IWP: ABC" on one line, its value alone on the next.
+  const lines = String(rawCell).split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  for (let i = 0; i < lines.length - 1; i++) {
+    const label = upper(lines[i]).replace(/[:.\s]+$/, '');
+    if (wanted.includes(label) && lines[i + 1]) return lines[i + 1];
+  }
+
+  return null;
+}
+
 export function findLabeledValue(grid, aliases, { searchRows = 25 } = {}) {
   const wanted = aliases.map((a) => upper(a).replace(/[:.\s]+$/, ''));
 
@@ -32,18 +78,26 @@ export function findLabeledValue(grid, aliases, { searchRows = 25 } = {}) {
     const row = grid[r] ?? [];
 
     for (let c = 0; c < row.length; c++) {
-      const cell = upper(row[c]).replace(/[:.\s]+$/, '');
+      const raw = clean(row[c]);
+      const cell = upper(raw).replace(/[:.\s]+$/, '');
+
+      // Some templates merge the label and its value into one cell —
+      // "IWP: IP-SMM30C0012FPP-K447-104" — or stack them on separate lines
+      // within it. Take what follows the label.
+      const inline = matchInline(raw, wanted);
+      if (inline) return { value: inline, row: r, col: c };
+
       if (!wanted.includes(cell)) continue;
 
       // to the right
       for (let offset = 1; offset <= 3; offset++) {
         const value = clean(row[c + offset]);
-        if (value) return { value, row: r, col: c + offset };
+        if (value && !looksLikeLabel(value)) return { value, row: r, col: c + offset };
       }
       // below
       for (let offset = 1; offset <= 2; offset++) {
         const value = clean(grid[r + offset]?.[c]);
-        if (value) return { value, row: r + offset, col: c };
+        if (value && !looksLikeLabel(value)) return { value, row: r + offset, col: c };
       }
     }
   }
@@ -95,12 +149,20 @@ export function extractSheet(grid, profile, sheetName = '') {
   const note = (severity, code, message, extra = {}) =>
     issues.push({ severity, code, message, sheet: sheetName, ...extra });
 
-  // --- header block
+  // --- material table, found first so the header search knows where to stop
+  const table = findTableHeader(grid, profile.columns ?? {}, {
+    searchRows: profile.headerSearchRows ?? 40
+  });
+
+  // Header fields sit above the table. Searching past it starts matching the
+  // table's own column headings instead.
+  const headerRows = table
+    ? table.row
+    : Math.min(profile.headerSearchRows ?? 25, grid.length);
+
   const header = {};
   for (const [field, spec] of Object.entries(profile.header ?? {})) {
-    const found = findLabeledValue(grid, spec.aliases, {
-      searchRows: profile.headerSearchRows ?? 25
-    });
+    const found = findLabeledValue(grid, spec.aliases, { searchRows: headerRows });
 
     if (!found) {
       if (spec.required) {
@@ -113,11 +175,6 @@ export function extractSheet(grid, profile, sheetName = '') {
 
   header.isoNumber = normalizeIso(header.isoNumber);
   header.isoSheet = normalizeSheet(header.isoSheet) ?? profile.defaultSheet ?? '01';
-
-  // --- material table
-  const table = findTableHeader(grid, profile.columns ?? {}, {
-    searchRows: profile.headerSearchRows ?? 40
-  });
 
   if (!table) {
     note(SEVERITY.ERROR, 'NO_TABLE', 'Could not find the material table on this sheet.');
@@ -157,7 +214,7 @@ export function extractSheet(grid, profile, sheetName = '') {
 
     const quantity = normalizeQuantity(rawQuantity);
     const size = normalizeSize(at('size'));
-    const { uom, rule } = inferUom(description, at('uom'));
+    const { uom, rule } = inferUom(description, at('uom'), rawQuantity);
 
     const line = {
       sourceRow: r + 1,
@@ -186,7 +243,7 @@ export function extractSheet(grid, profile, sheetName = '') {
 
     // A size that survived normalisation unrecognised is worth a look: this
     // is usually where Excel's date conversion has done something new.
-    if (at('size') && size && !/^[\d\-/]+"?$/.test(size)) {
+    if (at('size') && size && !/^[\d\-/]+"?(x[\d\-/]+"?)?$/.test(size)) {
       note(SEVERITY.WARNING, 'ODD_SIZE',
         `Row ${r + 1}: could not read the size "${at('size')}".`,
         { row: r + 1, value: at('size') });

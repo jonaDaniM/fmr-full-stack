@@ -63,8 +63,13 @@ test('a genuine date is not mistaken for a fraction', () => {
   assert.equal(fractionFromDateText('12-Dec'), null);
 });
 
+test('a reducing size is read as both its bores', () => {
+  // Written this way on real drawings for tees and reducers.
+  assert.equal(normalizeSize('6 x 4'), '6"x4"');
+});
+
 test('unreadable sizes are preserved rather than dropped', () => {
-  assert.equal(normalizeSize('6 x 4'), '6 x 4');
+  assert.equal(normalizeSize('SEE DETAIL'), 'SEE DETAIL');
   assert.equal(normalizeSize(''), null);
   assert.equal(normalizeSize(null), null);
 });

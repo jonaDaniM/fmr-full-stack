@@ -71,7 +71,7 @@ export function validateDraft(draft, { requireFmrNumber = false } = {}) {
     const description = clean(line.description);
     const quantity = normalizeQuantity(line.quantity);
     const size = normalizeSize(line.size);
-    const { uom, rule } = inferUom(description, line.uom);
+    const { uom, rule } = inferUom(description, line.uom, line.quantity);
 
     if (!description) {
       at('NO_DESCRIPTION', 'no material description.');
@@ -85,7 +85,7 @@ export function validateDraft(draft, { requireFmrNumber = false } = {}) {
 
     // A size that survives normalisation unrecognised usually means something
     // was pasted in from a spreadsheet that mangled it.
-    if (clean(line.size) && size && !/^[\d\-/]+"?$/.test(size)) {
+    if (clean(line.size) && size && !/^[\d\-/]+"?(x[\d\-/]+"?)?$/.test(size)) {
       at('ODD_SIZE', `could not read the size "${clean(line.size)}".`, SEVERITY.WARNING);
     }
 

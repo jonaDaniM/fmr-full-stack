@@ -64,6 +64,15 @@ export function normalizeSize(value) {
   const raw = String(recovered ?? value).trim();
   if (!raw) return null;
 
+  // Reducing fittings carry both bores: a 2X1 tee, a 12X8 reducer. Normalise
+  // each side on its own and rejoin, so 2X1 1/2 becomes 2"x1-1/2".
+  const reducer = raw.match(/^(.+?)\s*[xX]\s*(.+)$/);
+  if (reducer && !/^\d+\/\d+$/.test(raw)) {
+    const large = normalizeSize(reducer[1]);
+    const small = normalizeSize(reducer[2]);
+    if (large && small) return `${large}x${small}`;
+  }
+
   // Strip units and quotes, keep digits, dots, slashes, hyphens, spaces.
   const cleaned = raw
     .replace(/["″'']/g, '')
@@ -72,8 +81,9 @@ export function normalizeSize(value) {
 
   if (!cleaned) return null;
 
-  // Whole plus fraction: "1-1/2", "1 1/2"
-  const mixed = cleaned.match(/^(\d+)[-\s]+(\d+)\/(\d+)$/);
+  // Whole plus fraction: "1-1/2", "1 1/2", and "1.1/2" as the PDF scraper
+  // writes it — a dot standing in for the gap, not a decimal point.
+  const mixed = cleaned.match(/^(\d+)[-\s.]+(\d+)\/(\d+)$/);
   if (mixed) {
     const [, whole, numerator, denominator] = mixed;
     return `${Number(whole)}-${Number(numerator)}/${Number(denominator)}"`;
@@ -112,12 +122,30 @@ export function normalizeSize(value) {
  * Pipe and tubing are ordered by length; fittings and valves by the each.
  * Getting this wrong means a crew is told to find 20 feet of elbows.
  */
-export function inferUom(description, explicit) {
+export function inferUom(description, explicit, rawQuantity) {
   const stated = String(explicit ?? '').trim().toUpperCase();
   if (stated) return { uom: stated, rule: 'stated' };
 
+  // A takeoff writes measured material with a foot mark and counted material
+  // as a bare number, so the mark is better evidence than the wording.
+  if (quantityLooksMeasured(rawQuantity)) {
+    return { uom: 'FT', rule: 'measured quantity' };
+  }
+
   const text = String(description ?? '').toUpperCase();
   if (!text) return { uom: 'EA', rule: 'default' };
+
+  // A pipe support names the pipe it holds — "U-BOLT GUIDE FOR 2\" PIPE" is
+  // one bolt, not two feet of anything. These are counted, and the word PIPE
+  // in them is describing what they attach to.
+  if (/\b(SUPPORT|GUIDE|CRADLE|HANGER|CLAMP|SHOE|U-BOLT|UBOLT|BRACKET|ANCHOR|TRUNNION|SADDLE|STANCHION|BASE|SPACER|SHIELD|STRAP)\b/.test(text)) {
+    return { uom: 'EA', rule: 'pipe support' };
+  }
+
+  // Likewise a fitting sized against a pipe: an elbow is counted.
+  if (/\b(ELL|ELBOW|TEE|REDUCER|COUPLING|UNION|FLANGE|NIPPLE|PLUG|CAP|VALVE|BOLT|NUT|GASKET|STUD|SCREW|WASHER|ADAPTER|CONNECTION|CAMLOCK|FITTING)\b/.test(text)) {
+    return { uom: 'EA', rule: 'fitting' };
+  }
 
   if (/\b(PIPE|TUBE|TUBING|HOSE|CABLE|WIRE|INSULATION)\b/.test(text)) {
     return { uom: 'FT', rule: 'length material' };
@@ -138,10 +166,23 @@ export function normalizeQuantity(value) {
   const cleaned = String(value)
     .replace(/,/g, '')
     .replace(/\b(EA|FT|LB|GAL|PCS?|EACH)\b/gi, '')
+    // Pipe is taken off in feet and written with a foot mark: 49.2'
+    .replace(/["'″′]/g, '')
     .trim();
 
   const parsed = Number(cleaned);
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
+}
+
+/**
+ * Does this quantity carry a foot mark?
+ *
+ * A takeoff writes pipe as 49.2' and fittings as a bare count, so the mark
+ * itself says the line is measured rather than counted — better evidence than
+ * guessing from the description.
+ */
+export function quantityLooksMeasured(value) {
+  return /\d\s*['′]/.test(String(value ?? ''));
 }
 
 /** Drawing numbers vary in punctuation between projects. */
