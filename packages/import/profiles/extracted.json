@@ -1,0 +1,27 @@
+{
+  "name": "Extracted drawing material",
+  "description": "Rows from extract_materials.py, one CSV per extraction run. Each row already names its drawing, so a run covering many drawings becomes many FMRs.",
+
+  "headerSearchRows": 2,
+  "stopAfterBlankRows": 2,
+  "defaultSheet": "01",
+
+  "stopPatterns": ["^total", "^grand total"],
+
+  "header": {
+    "isoNumber": { "aliases": ["iso_number", "ISO Number", "Drawing"], "required": true },
+    "isoSheet":  { "aliases": ["sheet", "iso_sheet", "Sheet"] }
+  },
+
+  "requiredColumns": ["quantity", "description"],
+
+  "columns": {
+    "commodityCode":   ["commodity_code", "Commodity Code", "ident"],
+    "size":            ["size", "Size", "npd"],
+    "quantity":        ["quantity", "Quantity", "qty"],
+    "description":     ["description", "Description"],
+    "storageLocation": ["location", "storage_location"],
+    "category":        ["category", "Category"],
+    "confidence":      ["confidence", "Confidence"]
+  }
+}

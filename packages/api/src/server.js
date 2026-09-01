@@ -44,6 +44,7 @@ import {
 } from '../../core/src/services/admin.js';
 import { getBootstrap } from '../../core/src/services/bootstrap.js';
 import { readWorkbook } from '../../import/src/workbook.js';
+import { groupExtractedRows, describeExtraction } from '../../import/src/extracted.js';
 import { readFile as readProfileFile } from 'node:fs/promises';
 import {
   authenticate, require as requirePermission, verifyGoogleToken,
@@ -293,6 +294,54 @@ route('POST', /^\/api\/import\/stage$/, async (req, res, { url }) => {
   });
 
   json(res, 200, result);
+});
+
+/**
+ * Stage the output of a drawing extraction run.
+ *
+ * extract_materials.py reads material off ISO drawing PDFs; this takes its CSV
+ * and turns it into one draft FMR per drawing. Nothing is published — the
+ * drafts queue is where a person checks the extractor's work.
+ */
+route('POST', /^\/api\/import\/extracted$/, async (req, res, { url }) => {
+  const ctx = await authenticate(req);
+  requirePermission(ctx, 'ownerEdit');
+
+  const client = await pool.connect();
+  try {
+    await assertImportOpen(client, ctx.projectId);
+  } finally {
+    client.release();
+  }
+
+  const chunks = [];
+  let size = 0;
+  for await (const chunk of req) {
+    size += chunk.length;
+    if (size > 25_000_000) throw new LedgerError('That file is too large.', 'TOO_LARGE');
+    chunks.push(chunk);
+  }
+  if (!size) throw new LedgerError('No file was uploaded.', 'NO_FILE');
+
+  const minConfidence = Number(url.searchParams.get('minConfidence')) || 0;
+  const { sheets, summary } = groupExtractedRows(
+    Buffer.concat(chunks).toString('utf8'),
+    { minConfidence }
+  );
+
+  if (!sheets.length) {
+    throw new LedgerError('No drawings were found in that file.', 'NO_DRAWINGS');
+  }
+
+  const result = await stageWorkbook(ctx, {
+    sheets: sheets.map((s) => ({ name: s.sheetName, grid: [] })),
+    sourceName: url.searchParams.get('filename') ?? 'extraction.csv',
+    profile: { header: {}, columns: {} },
+    profileName: 'extracted',
+    preExtracted: sheets
+  });
+
+  json(res, 200, { ...result, summary, description: describeExtraction(summary) });
 });
 
 route('GET', /^\/api\/import\/([0-9a-f-]{36})$/, async (req, res, { match }) => {

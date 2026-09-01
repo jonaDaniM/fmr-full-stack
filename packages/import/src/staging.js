@@ -11,9 +11,25 @@ import { extractWorkbook, SEVERITY } from './extract.js';
 import { LedgerError } from '../../core/src/domain/ledger.js';
 
 /** Parse a workbook and stage it for review. */
-export async function stageWorkbook(ctx, { sheets, sourceName, profile, profileName }) {
+export async function stageWorkbook(ctx, { sheets, sourceName, profile, profileName,
+                                            preExtracted }) {
   const { user, projectId } = ctx;
-  const extraction = extractWorkbook(sheets, profile);
+
+  // Rows that arrived already parsed — from the drawing extractor — skip the
+  // workbook reader and come straight in.
+  const extraction = preExtracted
+    ? {
+        sheets: preExtracted,
+        summary: {
+          sheets: preExtracted.length,
+          lines: preExtracted.reduce((t, s) => t + s.lines.length, 0),
+          errors: preExtracted.reduce(
+            (t, s) => t + s.issues.filter((i) => i.severity === 'error').length, 0),
+          warnings: preExtracted.reduce(
+            (t, s) => t + s.issues.filter((i) => i.severity === 'warning').length, 0)
+        }
+      }
+    : extractWorkbook(sheets, profile);
 
   return withTransaction(async (client) => {
     const { rows: batchRows } = await client.query(
