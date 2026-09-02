@@ -19,6 +19,7 @@
 import { readFile } from 'node:fs/promises';
 import { pool, withTransaction } from '../../core/src/db/pool.js';
 import { lineStatus } from '../../core/src/domain/ledger.js';
+import { BACKORDER_STATUS } from '../../core/src/domain/backorder.js';
 
 /** Minimal CSV reader: handles quoted fields, embedded commas and newlines. */
 export function parseCsv(text) {
@@ -59,12 +60,48 @@ const num = (v) => {
   return Number.isFinite(parsed) ? parsed : 0;
 };
 const text = (v) => String(v ?? '').trim() || null;
+
+/**
+ * The spreadsheet's keys carry the table they came from: `CORR-1A1855A9-…`,
+ * `TXN-…`, `FMRLINE-…`. Postgres types these columns as `uuid` and the prefix
+ * is what a column name already says, so it is dropped and the uuid kept.
+ * Anything that is not a prefixed uuid is left alone to fail loudly rather
+ * than be silently reshaped.
+ */
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const uuid = (v) => {
+  const value = String(v ?? '').trim();
+  if (!value) return null;
+  if (UUID.test(value)) return value.toLowerCase();
+  const stripped = value.replace(/^[A-Za-z_]+-/, '');
+  return UUID.test(stripped) ? stripped.toLowerCase() : value;
+};
 const yes = (v) => String(v ?? '').trim().toUpperCase() === 'YES';
 const date = (v) => {
   const value = String(v ?? '').trim();
   if (!value) return null;
   const parsed = new Date(value);
   return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString().slice(0, 10);
+};
+
+/**
+ * What the spreadsheet called a backorder status, in this system's words.
+ *
+ * FMRv3 wrote "Pending Admin Review" where the ledger says "Pending". Nothing
+ * matches on the old wording, so 166 requests loaded as a status no screen
+ * knows: the office dashboard read zero awaiting a decision while the queue
+ * held every one of them. Statuses that already agree are left alone.
+ */
+const BACKORDER_STATUS_ALIASES = new Map([
+  ['pending admin review', BACKORDER_STATUS.PENDING],
+  ['returned to field', BACKORDER_STATUS.RETURNED],
+  ['partially confirmed', BACKORDER_STATUS.PARTIALLY_CONFIRMED]
+]);
+
+const backorderStatus = (value) => {
+  const given = text(value);
+  if (!given) return BACKORDER_STATUS.PENDING;
+  return BACKORDER_STATUS_ALIASES.get(given.toLowerCase()) ?? given;
 };
 
 /**
@@ -324,7 +361,7 @@ export async function migrate({ projectCode, projectName, dir, dryRun = true }) 
           num(row.Qty_Requested_Backorder), num(row.Qty_Confirmed_Backorder),
           num(row.Qty_Pending), text(row.Reason), text(row.Field_Notes),
           text(row.Reported_By_Name), text(row.Reported_At) || null,
-          text(row.Status) ?? 'Pending', text(row.Admin_Decision),
+          backorderStatus(row.Status), text(row.Admin_Decision),
           text(row.Admin_Notes), text(row.Decided_By_Name),
           text(row.Decided_At) || null, text(row.Returned_Review_Reason),
           yes(row.Active)
@@ -347,7 +384,7 @@ export async function migrate({ projectCode, projectName, dir, dryRun = true }) 
          VALUES ($1, coalesce(nullif($2,'')::uuid, gen_random_uuid()),
                  $3,$4,$5,$6,$7,$8,$9,$10,$11, coalesce($12::timestamptz, now()))`,
         [
-          projectId, text(row.Correlation_ID) ?? '', fmrId, lineId,
+          projectId, uuid(row.Correlation_ID) ?? '', fmrId, lineId,
           text(row.Transaction_Type) ?? 'UNKNOWN', num(row.Quantity), text(row.UOM),
           text(row.Performed_By_Name), text(row.Issued_To_Name),
           text(row.Storage_Location), text(row.Notes), text(row.Timestamp)
