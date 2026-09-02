@@ -1,6 +1,11 @@
 node_modules/
 .env
 *.log
+
+# Client data. Exports of the live system are staged here to be loaded and
+# then removed; none of it belongs in the repository or in a container image.
+migration-data/
+*.xlsx
 __pycache__/
 *.pyc
 .venv/

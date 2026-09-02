@@ -7,7 +7,7 @@
  */
 
 import http from 'node:http';
-import { readFile } from 'node:fs/promises';
+import { readFile, stat } from 'node:fs/promises';
 import { join, extname, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { dirname } from 'node:path';
@@ -850,20 +850,51 @@ const MIME = {
   '.ico': 'image/x-icon'
 };
 
-async function serveStatic(pathname, res) {
+/**
+ * A tag for a file's current contents, so an unchanged one is not sent twice.
+ *
+ * Every screen here is its own document, so moving between them re-requests
+ * the whole web layer: two stylesheets and the module graph, about 100KB. On
+ * a deployment that was 100KB and a second and a half of blank page on every
+ * screen change, because `no-cache` with no validator means the browser must
+ * ask and the server can only answer with the whole body. With a tag it asks
+ * and is told 304, and the topbar is painted from cache immediately.
+ *
+ * Keyed on size and mtime rather than a hash of the contents: the check is a
+ * stat, it runs on every request, and a deploy replaces the files anyway.
+ */
+const etagFor = (stats) => `W/"${stats.size.toString(16)}-${stats.mtimeMs.toString(16)}"`;
+
+async function serveStatic(pathname, res, req) {
   // normalize() collapses any ../ before it can escape the web root.
   const rel = normalize(pathname === '/' ? '/index.html' : pathname).replace(/^(\.\.[/\\])+/, '');
   const file = join(webRoot, rel);
   if (!file.startsWith(webRoot)) return false;
 
   try {
-    const body = await readFile(file);
-    res.writeHead(200, {
+    const stats = await stat(file);
+    if (!stats.isFile()) return false;
+
+    const etag = etagFor(stats);
+
+    // `no-cache` is kept deliberately: the browser still checks every time,
+    // so a deploy is picked up on the next request rather than whenever a
+    // max-age happens to lapse. What changes is the size of the answer.
+    const headers = {
       ...SECURITY_HEADERS,
       'content-type': MIME[extname(file)] ?? 'application/octet-stream',
-      'cache-control': 'no-cache'
-    });
-    res.end(body);
+      'cache-control': 'no-cache',
+      etag
+    };
+
+    if (req?.headers['if-none-match'] === etag) {
+      res.writeHead(304, headers);
+      res.end();
+      return true;
+    }
+
+    res.writeHead(200, headers);
+    res.end(req?.method === 'HEAD' ? undefined : await readFile(file));
     return true;
   } catch {
     return false;
@@ -873,8 +904,13 @@ async function serveStatic(pathname, res) {
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
 
-  if (req.method === 'GET' && !url.pathname.startsWith('/api/')) {
-    if (await serveStatic(url.pathname, res)) return;
+  // HEAD is answered like GET without the body. It used to fall through to
+  // the API router and 404 on files that plainly exist, which makes anything
+  // that probes a URL before fetching it — a health check, a proxy — believe
+  // the page is missing.
+  if ((req.method === 'GET' || req.method === 'HEAD')
+      && !url.pathname.startsWith('/api/')) {
+    if (await serveStatic(url.pathname, res, req)) return;
   }
 
   const matched = routes
