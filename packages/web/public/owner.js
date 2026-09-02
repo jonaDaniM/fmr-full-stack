@@ -260,8 +260,7 @@ async function showHistory(lineId) {
     body,
     wide: true,
     confirmLabel: 'Close',
-    cancelLabel: 'Done',
-    onSubmit: () => null
+    readOnly: true
   });
 
   if (chosen?.pick) previewUndo(chosen.pick);

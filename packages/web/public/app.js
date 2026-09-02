@@ -409,12 +409,12 @@ async function showHistory(lineId) {
 
   await dialog({
     title: 'What happened to this line',
-    lede: line ? `${esc(line.fmrNumber)} · line ${esc(line.lineNumber)} · ${esc(line.description ?? '')}` : '',
+    // lede is plain text — the dialog escapes it.
+    lede: line ? `${line.fmrNumber} · line ${line.lineNumber} · ${line.description ?? ''}` : '',
     body,
     wide: true,
     confirmLabel: 'Close',
-    cancelLabel: 'Done',
-    onSubmit: () => null
+    readOnly: true
   });
 }
 
