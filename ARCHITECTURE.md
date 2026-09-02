@@ -41,6 +41,7 @@ packages/
   web/public/           5,453 lines   seven screens
   migrate/src/            390 lines   loading the old spreadsheet
   extract/                703 lines   Python: material out of drawing PDFs
+  import/src/runner.js                   spawns ../Archive to read a package
 db/migrations/               6 files   schema
 scripts/check-ui.js                    enforces the web layer's rules
 ```
@@ -267,6 +268,7 @@ deactivated, and nobody can deactivate themselves.
 |---|---|
 | `audit_log` | every mutation, with the actor and a reason |
 | `idempotency_keys` | a retry after a dropped connection replays the original result instead of moving material twice |
+| `extraction_jobs` | a package of drawings being read: the only asynchronous work, polled by the browser and closed out on restart |
 | `lists` | dropdown values the office edits without a deploy |
 | `project_controls` | pause field or import work, with a reason the crew sees |
 | `schema_migrations` | applied migrations, by filename |
@@ -284,6 +286,7 @@ Forward-only, applied in filename order, recorded in `schema_migrations`.
 004_manual_staging.sql       drafts typed by hand
 005_admin.sql                members, lists, renumbering
 006_bag_tag_sequence.sql     per-project bag tag counter
+007_extraction_jobs.sql      drawing packages being read
 ```
 
 ```bash

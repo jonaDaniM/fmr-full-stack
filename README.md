@@ -222,9 +222,33 @@ asked and what it decided.
 
 ## Import
 
-Workbooks are parsed into a staging batch and reviewed before anything becomes
-a real FMR. Errors block publishing; warnings do not. Quantities and sizes can
-be corrected in the review screen.
+Drawings, workbooks and CSVs are parsed into a staging batch and reviewed
+before anything becomes a real FMR. Errors block publishing; warnings do not.
+Quantities and sizes can be corrected in the review screen.
+
+### Drawings
+
+Drop an IWP package of drawing PDFs on the import screen and the material on
+each one becomes an FMR to check. The reading is done by `../Archive`, a
+Python project that takes the bill of materials off the sheet:
+
+```bash
+cd ../Archive
+python3 -m venv .venv && .venv/bin/pip install -e .
+```
+
+`start-local.sh` finds that venv on its own. Without it everything else still
+works and only the drawing upload refuses, saying the reader is not installed.
+
+Reading a package takes longer than a request should be held open, so the
+upload answers with a job and the browser asks how it is going until there is
+a batch to review — the one piece of asynchronous work in the system. A job
+left running by a restart is closed out on boot.
+
+A drawing carries no FMR number; the office issues those. One is proposed from
+the drawing number so a reviewer has something to accept or change, and it is
+flagged so it never looks like a number somebody chose. If a draft is already
+waiting under that number, the sheet still arrives for review but without it.
 
 Drawings keep a similar shape between projects but never quite the same one, so
 the engine is fixed and the variation lives in a **profile** — a JSON file per
