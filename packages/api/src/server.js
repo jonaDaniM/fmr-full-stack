@@ -51,9 +51,11 @@ import {
 import { readFile as readProfileFile } from 'node:fs/promises';
 import {
   authenticate, require as requirePermission, verifyGoogleToken,
-  findUser, recordLogin, issueSession, readSession, membershipsFor, AuthError
+  findUser, recordLogin, issueSession, readSession, membershipsFor,
+  revokeSession, AuthError
 } from './auth.js';
-import { once, IdempotencyConflict } from './idempotency.js';
+import { once, IdempotencyConflict, IdempotencyInFlight } from './idempotency.js';
+import { createRateLimiter } from './rateLimit.js';
 
 /**
  * Headers on everything this server sends.
@@ -122,7 +124,13 @@ const route = (method, pattern, handler) =>
 
 // --- sign in ---------------------------------------------------------------
 
+const signInLimiter = createRateLimiter();
+
 route('POST', /^\/api\/auth\/google$/, async (req, res) => {
+  if (signInLimiter.exceeded(req)) {
+    throw new AuthError('Too many sign-in attempts. Wait a few minutes and try again.', 429);
+  }
+
   const { idToken } = await readBody(req);
   if (!idToken) throw new AuthError('No sign-in token supplied.', 400);
 
@@ -211,7 +219,11 @@ route('GET', /^\/api\/auth\/dev$/, async (_req, res) => {
   });
 });
 
-route('POST', /^\/api\/auth\/signout$/, async (_req, res) => {
+route('POST', /^\/api\/auth\/signout$/, async (req, res) => {
+  // Clearing the cookie persuades this browser to forget the token. Revoking
+  // the session is what stops a copy of it being used somewhere else.
+  await revokeSession(readSession(req.headers.cookie));
+
   res.setHeader('set-cookie', 'fmr_session=; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=0');
   json(res, 200, { ok: true });
 });
@@ -220,8 +232,14 @@ route('GET', /^\/api\/me$/, async (req, res) => {
   const session = readSession(req.headers.cookie);
   if (!session) throw new AuthError('Please sign in.');
 
-  const { rows } = await pool.query('SELECT * FROM users WHERE id = $1 AND active', [session.sub]);
-  if (!rows[0]) throw new AuthError('This account is no longer active.');
+  // Checked here as well as in authenticate(): this route is what the shell
+  // asks on load, so a revoked session must not paint a signed-in topbar.
+  const { rows } = await pool.query(
+    `SELECT u.*, EXISTS (SELECT 1 FROM revoked_sessions r WHERE r.sid = $2) AS revoked
+       FROM users u WHERE u.id = $1 AND u.active`,
+    [session.sub, session.sid ?? null]
+  );
+  if (rows[0]?.revoked) throw new AuthError('You have been signed out. Please sign in again.');
 
   json(res, 200, {
     user: { id: rows[0].id, email: rows[0].email, name: rows[0].display_name },
@@ -925,7 +943,7 @@ const server = http.createServer(async (req, res) => {
     if (error instanceof AuthError) {
       return json(res, error.status, { error: error.message });
     }
-    if (error instanceof IdempotencyConflict) {
+    if (error instanceof IdempotencyConflict || error instanceof IdempotencyInFlight) {
       return json(res, error.status, { error: error.message });
     }
     if (error instanceof LedgerError) {
@@ -933,7 +951,10 @@ const server = http.createServer(async (req, res) => {
       return json(res, 422, { error: error.message, code: error.code });
     }
 
-    console.error(error);
+    // Message and stack, not the error object: a pg error carries the failing
+    // statement and its parameter values, which for this system means client
+    // material data copied into the logs of whoever can read them.
+    console.error(`${req.method} ${url.pathname} failed:`, error.message, error.stack);
     json(res, 500, { error: 'Something went wrong. Try again.' });
   }
 });

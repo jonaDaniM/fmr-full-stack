@@ -21,7 +21,10 @@ export async function withTransaction(fn) {
     await client.query('COMMIT');
     return result;
   } catch (error) {
-    await client.query('ROLLBACK');
+    // A failing ROLLBACK — a dropped connection, usually — must not replace
+    // the error that caused it. The original is the one worth reading.
+    await client.query('ROLLBACK').catch((rollbackError) =>
+      console.error('rollback failed after an error:', rollbackError.message));
     throw error;
   } finally {
     client.release();

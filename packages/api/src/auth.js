@@ -21,8 +21,25 @@ export class AuthError extends Error {
   }
 }
 
-/** Verify a Google ID token and return its claims. */
+/** Who Google says issues its identity tokens. Both spellings are current. */
+const GOOGLE_ISSUERS = new Set(['accounts.google.com', 'https://accounts.google.com']);
+
+/**
+ * Verify a Google ID token and return its claims.
+ *
+ * The tokeninfo endpoint checks the signature and expiry before it answers,
+ * so those are not re-derived here. Every claim this system's own decisions
+ * rest on is checked here regardless: relying on another service's validation
+ * without stating what is being relied on is how a check goes missing.
+ */
 export async function verifyGoogleToken(idToken) {
+  const expectedAudience = process.env.GOOGLE_CLIENT_ID;
+  if (!expectedAudience) {
+    // Without this there is nothing to compare aud against, and every token
+    // would be accepted. Refusing to sign anyone in is the safe failure.
+    throw new AuthError('Google sign-in is not configured on this server.', 500);
+  }
+
   const response = await fetch(
     `https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(idToken)}`
   );
@@ -30,11 +47,22 @@ export async function verifyGoogleToken(idToken) {
 
   const claims = await response.json();
 
-  if (claims.aud !== process.env.GOOGLE_CLIENT_ID) {
+  if (claims.aud !== expectedAudience) {
     throw new AuthError('This sign-in was issued for a different application.');
+  }
+  if (!GOOGLE_ISSUERS.has(claims.iss)) {
+    throw new AuthError('This sign-in did not come from Google.');
+  }
+  // Seconds since the epoch, as a string. Expired tokens do not reach here,
+  // but that is the endpoint's behaviour rather than a guarantee to inherit.
+  if (!(Number(claims.exp) * 1000 > Date.now())) {
+    throw new AuthError('That sign-in has expired. Try again.');
   }
   if (claims.email_verified !== 'true' && claims.email_verified !== true) {
     throw new AuthError('This Google account has no verified email address.');
+  }
+  if (!claims.email) {
+    throw new AuthError('This Google account has no email address.');
   }
 
   return { email: String(claims.email).toLowerCase(), name: claims.name || claims.email };
@@ -120,6 +148,32 @@ export function issueSession(user) {
   });
 }
 
+/**
+ * End a session for good, not just in the browser that held it.
+ *
+ * The token is stateless, so clearing the cookie only persuades one browser to
+ * forget it. A cookie copied beforehand stayed valid for the rest of its
+ * twelve hours — which on a shared warehouse terminal is the whole point of
+ * signing out.
+ */
+export async function revokeSession(session) {
+  if (!session?.sid) return;
+  await pool.query(
+    `INSERT INTO revoked_sessions (sid, user_id, expires_at)
+     VALUES ($1, $2, to_timestamp($3::bigint / 1000.0))
+     ON CONFLICT (sid) DO NOTHING`,
+    [session.sid, session.sub, session.exp]
+  );
+}
+
+/** Revocations only have to outlive the tokens they revoke. */
+export async function purgeRevokedSessions() {
+  const { rowCount } = await pool.query(
+    'DELETE FROM revoked_sessions WHERE expires_at < now()'
+  );
+  return rowCount;
+}
+
 export function readSession(cookieHeader) {
   const cookies = Object.fromEntries(
     String(cookieHeader ?? '')
@@ -141,31 +195,39 @@ export async function authenticate(req) {
   const session = readSession(req.headers.cookie);
   if (!session) throw new AuthError('Please sign in.');
 
-  const { rows } = await pool.query(
-    'SELECT * FROM users WHERE id = $1 AND active',
-    [session.sub]
-  );
-  const user = rows[0];
-  if (!user) throw new AuthError('This account is no longer active.');
-
   const projectId = req.headers['x-project-id'];
   if (!projectId) throw new AuthError('No project selected.', 400);
 
-  const { rows: memberRows } = await pool.query(
-    `SELECT * FROM project_members WHERE user_id = $1 AND project_id = $2`,
-    [user.id, projectId]
+  // One round trip, on the hot path of every API call: the user, whether this
+  // session was signed out, and the membership that decides what they may do.
+  // The membership is a LEFT JOIN so that "no such project for you" stays
+  // distinguishable from "no such user".
+  const { rows } = await pool.query(
+    `SELECT u.*,
+            m.can_search, m.can_field_transact,
+            m.can_admin_backorder, m.can_owner_edit,
+            m.project_id,
+            EXISTS (SELECT 1 FROM revoked_sessions r WHERE r.sid = $3) AS revoked
+       FROM users u
+       LEFT JOIN project_members m
+         ON m.user_id = u.id AND m.project_id = $2
+      WHERE u.id = $1 AND u.active`,
+    [session.sub, projectId, session.sid ?? null]
   );
-  const membership = memberRows[0];
-  if (!membership) throw new AuthError('You do not have access to this project.', 403);
+
+  const row = rows[0];
+  if (!row) throw new AuthError('This account is no longer active.');
+  if (row.revoked) throw new AuthError('You have been signed out. Please sign in again.');
+  if (!row.project_id) throw new AuthError('You do not have access to this project.', 403);
 
   return {
-    user,
+    user: row,
     projectId,
     permissions: {
-      search: membership.can_search,
-      fieldTransact: membership.can_field_transact,
-      adminBackorder: membership.can_admin_backorder,
-      ownerEdit: membership.can_owner_edit
+      search: row.can_search,
+      fieldTransact: row.can_field_transact,
+      adminBackorder: row.can_admin_backorder,
+      ownerEdit: row.can_owner_edit
     }
   };
 }
