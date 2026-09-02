@@ -38,6 +38,47 @@ test('lines are numbered within their own drawing', () => {
     'the drawing numbers its own lines, not the extractor');
 });
 
+test('every line points back at the row of the CSV it came from', () => {
+  // Two drawings interleaved, so a line's position in its drawing and its
+  // position in the file are different numbers — which is the whole point.
+  const { sheets } = groupExtractedRows(csv(
+    'a.pdf,1,D-1,PIPE,1,C1,2,1,FIRST,,raw,1.0,',
+    'b.pdf,1,D-2,PIPE,1,C2,2,1,OTHER DRAWING,,raw,1.0,',
+    'a.pdf,1,D-1,PIPE,2,C3,2,1,SECOND,,raw,1.0,'
+  ));
+
+  // Row 1 is the header, so the first data row is row 2 — what a person sees
+  // when they open the file to check it.
+  assert.deepEqual(sheets[0].lines.map((l) => l.sourceRow), [2, 4],
+    'the second line of D-1 is the fourth row of the file');
+  assert.deepEqual(sheets[1].lines.map((l) => l.sourceRow), [3]);
+});
+
+test('an issue anchors to the same row as the line it is about', () => {
+  // The review screen marks the offending row by matching an issue's sourceRow
+  // against a line's. They were once different numbers, so nothing ever matched
+  // and a low-confidence row could not be highlighted.
+  const { sheets } = groupExtractedRows(csv(
+    'a.pdf,1,D-1,PIPE,1,C1,2,1,GOOD,,raw,1.0,',
+    'a.pdf,1,D-1,PIPE,2,C2,2,1,DOUBTFUL,,raw,0.55,smudged'
+  ));
+
+  const doubt = sheets[0].issues.find((i) => i.code === 'LOW_CONFIDENCE');
+  const line = sheets[0].lines.find((l) => l.description === 'DOUBTFUL');
+  assert.equal(doubt.sourceRow, line.sourceRow, 'the anchors agree');
+  assert.equal(doubt.sourceRow, 3);
+});
+
+test('the page of the PDF is kept, and is not the source row', () => {
+  // page_number was once used as the source row. It answers a different
+  // question and is absent from any CSV not written by extract_materials.py.
+  const { sheets } = groupExtractedRows(csv(
+    'a.pdf,7,D-1,PIPE,1,C1,2,1,ON PAGE SEVEN,,raw,1.0,'
+  ));
+  assert.equal(sheets[0].lines[0].pageNumber, 7);
+  assert.equal(sheets[0].lines[0].sourceRow, 2);
+});
+
 test("the extractor's doubts follow the line they belong to", () => {
   const { sheets } = groupExtractedRows(csv(
     'a.pdf,1,D-1,PIPE,1,C1,2,1,GOOD ROW,,raw,1.0,',

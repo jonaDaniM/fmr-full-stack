@@ -34,7 +34,7 @@ export function groupExtractedRows(csvText, { minConfidence = 0 } = {}) {
   const byDrawing = new Map();
   let dropped = 0;
 
-  for (const row of rows) {
+  for (const [index, row] of rows.entries()) {
     const confidence = Number(row.confidence ?? 1);
     if (confidence < minConfidence) {
       dropped++;
@@ -71,9 +71,18 @@ export function groupExtractedRows(csvText, { minConfidence = 0 } = {}) {
     const description = clean(row.description);
     const { uom, rule } = inferUom(description, row.uom, row.quantity);
 
+    // Where to look when the extractor got it wrong. The CSV row is what a
+    // person can actually open and check, so that is what this points at —
+    // `index + 2` because the header is row 1 and a spreadsheet counts from 1.
+    // page_number was used here once, which is a different question entirely
+    // (which page of the PDF) and is null for any CSV not written by
+    // extract_materials.py — so every row's anchor was blank, and issues could
+    // never highlight the line that caused them.
     drawing.lines.push({
       lineNumber,
-      sourceRow: Number(row.page_number) || null,
+      sourceRow: index + 2,
+      pageNumber: Number(row.page_number) || null,
+      itemNo: clean(row.item_no) || null,
       commodityCode: clean(row.commodity_code) || null,
       size: normalizeSize(row.size),
       description: description || null,
@@ -93,7 +102,8 @@ export function groupExtractedRows(csvText, { minConfidence = 0 } = {}) {
         code: 'NO_QUANTITY',
         message: `Line ${lineNumber}: no quantity could be read from `
           + `"${clean(row.quantity)}". Enter one before publishing.`,
-        row: lineNumber
+        row: lineNumber,
+        sourceRow: index + 2
       });
     }
 
@@ -106,6 +116,7 @@ export function groupExtractedRows(csvText, { minConfidence = 0 } = {}) {
           `Line ${lineNumber}: the extractor was unsure — ` +
           `${row.warnings || 'no reason given'} (confidence ${confidence.toFixed(2)}).`,
         row: lineNumber,
+        sourceRow: index + 2,
         value: row.raw_text ?? null
       });
     }

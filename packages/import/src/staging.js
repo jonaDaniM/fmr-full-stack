@@ -102,8 +102,13 @@ export async function stageWorkbook(ctx, { sheets, sourceName, profile, profileN
               field_name, source_row, source_value)
            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
           [
+            // source_row anchors an issue to the row of the source file a
+            // person can open and check — the same number import_lines stores,
+            // which is what lets the review screen mark the offending row.
+            // `issue.row` is the line's position within its drawing and is a
+            // different number; using it here left every anchor unmatchable.
             batchId, itemId, sheet.sheetName, issue.severity, issue.code,
-            issue.message, issue.field ?? null, issue.row ?? null,
+            issue.message, issue.field ?? null, issue.sourceRow ?? issue.row ?? null,
             issue.value ?? null
           ]
         );
