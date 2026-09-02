@@ -19,7 +19,24 @@ can sign in by picking a seeded user. Without it the server refuses that route,
 and an account must already exist in `users` — an owner adds people from the
 owner screen.
 
-## First deploy
+## The short version
+
+```bash
+GCP_PROJECT=your-project ./deploy.sh setup      # once: database, secrets, APIs
+GOOGLE_CLIENT_ID=…apps.googleusercontent.com \
+  GCP_PROJECT=your-project ./deploy.sh          # every time after
+```
+
+`deploy.sh` runs the tests, builds the image, applies migrations as a separate
+job, and releases. It is safe to re-run: everything it creates it checks for
+first, so a setup interrupted halfway is finished by running it again.
+
+It will not deploy into whatever project gcloud happens to point at — the
+project is named explicitly or it refuses.
+
+The rest of this file is what the script does, for when it needs changing.
+
+## First deploy, by hand
 
 ```bash
 gcloud sql instances create fmr \
