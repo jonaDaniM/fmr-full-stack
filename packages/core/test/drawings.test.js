@@ -132,7 +132,18 @@ test('an issue anchors to the same row as the line it is about', () => {
   const issue = sheets[0].issues.find((i) => i.code === 'MISSING_QUANTITY');
   const line = sheets[0].lines[1];
   assert.equal(issue.sourceRow, line.sourceRow, 'the anchors agree');
-  assert.equal(issue.sourceRow, 2);
+  // The drawing prints "2" against that BOM row, so that is what to look for.
+  assert.equal(issue.sourceRow, '2');
+});
+
+test('a line points at the number printed on the drawing', () => {
+  // BOM point numbers are what someone checking the sheet reads. They usually
+  // run 1, 2, 3 — but when they do not, following the drawing beats counting.
+  const { sheets } = toDraftSheets(payload([
+    row({ pointNumber: '7' }), row({ pointNumber: '9' })
+  ]));
+  assert.deepEqual(sheets[0].lines.map((l) => l.sourceRow), ['7', '9']);
+  assert.deepEqual(sheets[0].lines.map((l) => l.lineNumber), [1, 2]);
 });
 
 test('a drawing with no material is reported, not silently empty', () => {

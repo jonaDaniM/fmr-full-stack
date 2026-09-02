@@ -52,12 +52,39 @@ export async function stageWorkbook(ctx, { sheets, sourceName, profile, profileN
       // Does this FMR already exist? Re-importing a revised sheet is normal,
       // so flag it rather than creating a duplicate.
       let existingFmrId = null;
+      let waitingAlready = false;
       if (sheet.header.fmrNumber) {
         const { rows } = await client.query(
           `SELECT id FROM fmr_headers WHERE project_id = $1 AND fmr_number = $2`,
           [projectId, sheet.header.fmrNumber]
         );
         existingFmrId = rows[0]?.id ?? null;
+
+        // And is one already waiting in the queue under that number? Only one
+        // may be, by index, so a second would fail at the insert — which read
+        // as "those drawings could not be read" rather than the truth, that
+        // the same package is already staged.
+        const { rows: staged } = await client.query(
+          `SELECT id FROM import_items
+            WHERE project_id = $1 AND upper(fmr_number) = upper($2)
+              AND published_fmr_id IS NULL AND NOT archived`,
+          [projectId, sheet.header.fmrNumber]
+        );
+        waitingAlready = staged.length > 0;
+      }
+
+      // Its number is dropped rather than the sheet: the material is still
+      // worth reviewing, and the reviewer gives it a number that is free.
+      const fmrNumber = waitingAlready ? null : sheet.header.fmrNumber ?? null;
+      if (waitingAlready) {
+        sheet.issues.push({
+          severity: SEVERITY.WARNING,
+          code: 'ALREADY_STAGED',
+          message: `${sheet.header.fmrNumber} is already waiting in the queue. `
+            + 'Give this one a number before publishing, or discard it.',
+          row: null,
+          sourceRow: null
+        });
       }
 
       const { rows: itemRows } = await client.query(
@@ -68,13 +95,14 @@ export async function stageWorkbook(ctx, { sheets, sourceName, profile, profileN
          VALUES ($1,$15,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
          RETURNING id`,
         [
-          batchId, sheet.sheetName, sheet.header.fmrNumber ?? null,
+          batchId, sheet.sheetName, fmrNumber,
           sheet.header.iwpNumber ?? null, sheet.header.isoNumber ?? null,
           sheet.header.isoSheet ?? null, sheet.header.requestedBy ?? null,
           parseDate(sheet.header.dateRequired), sheet.header.priority ?? null,
           sheet.header, sheet.lines.length,
-          hasErrors ? 'Blocked' : existingFmrId ? 'Duplicate' : 'Ready',
-          !hasErrors && !existingFmrId,
+          hasErrors || waitingAlready ? 'Blocked'
+            : existingFmrId ? 'Duplicate' : 'Ready',
+          !hasErrors && !existingFmrId && !waitingAlready,
           existingFmrId,
           projectId
         ]
@@ -115,7 +143,23 @@ export async function stageWorkbook(ctx, { sheets, sourceName, profile, profileN
       }
     }
 
-    return { batchId, summary: extraction.summary };
+    // Counted after the loop, not before it: staging can add an issue of its
+    // own — a number already waiting in the queue — and the tiles on the
+    // review screen have to agree with the rows underneath them.
+    const summary = {
+      ...extraction.summary,
+      errors: extraction.sheets.reduce(
+        (t, s) => t + s.issues.filter((i) => i.severity === SEVERITY.ERROR).length, 0),
+      warnings: extraction.sheets.reduce(
+        (t, s) => t + s.issues.filter((i) => i.severity === SEVERITY.WARNING).length, 0)
+    };
+
+    await client.query(
+      `UPDATE import_batches SET error_count = $2, warning_count = $3 WHERE id = $1`,
+      [batchId, summary.errors, summary.warnings]
+    );
+
+    return { batchId, summary };
   });
 }
 
