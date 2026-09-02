@@ -36,7 +36,6 @@ from .fmr_workbook import (
     sheet_names,
     workbook_filename,
 )
-from .pipeline import discover_pdfs
 from .spool_model import spool_sort_key
 from .time_savings import (
     fmr_iso_time_saved,
@@ -44,6 +43,19 @@ from .time_savings import (
     is_overflow_description,
     processing_seconds,
 )
+
+
+def discover_pdfs(folder: Path) -> List[Path]:
+    """Every PDF under a folder, in a stable order.
+
+    Sorted so a package reads the same way twice: two runs over the same
+    folder must produce the same drawings in the same order, or a reviewer
+    cannot tell what changed between them.
+    """
+    return sorted(
+        (p for p in folder.rglob("*") if p.is_file() and p.suffix.lower() == ".pdf"),
+        key=lambda p: str(p).lower(),
+    )
 
 
 DEFAULT_TEMPLATE = Path(__file__).resolve().parents[2] / "templates" / "FMR" / "blankFMR.xlsx"
