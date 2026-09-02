@@ -36,5 +36,11 @@ ENV NODE_ENV=production \
 # an account must already exist. Setting it in a deployment would let anyone
 # pick a user from a list.
 
+# Not root. The reader writes uploaded PDFs to a temp directory and runs a
+# parser over them; if either is ever made to misbehave it should not be
+# holding root in the container.
+RUN chown -R node:node /app /opt/reader
+USER node
+
 EXPOSE 8080
 CMD ["node", "packages/api/src/server.js"]
