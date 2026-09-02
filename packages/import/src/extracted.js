@@ -124,13 +124,19 @@ export function groupExtractedRows(csvText, { minConfidence = 0 } = {}) {
 
   const sheets = [...byDrawing.values()];
 
+  const count = (all, severity) => all.reduce(
+    (total, sheet) => total + sheet.issues.filter((i) => i.severity === severity).length, 0);
+
   return {
     sheets,
     summary: {
       sheets: sheets.length,
       lines: sheets.reduce((total, s) => total + s.lines.length, 0),
-      errors: 0,
-      warnings: sheets.reduce((total, s) => total + s.issues.length, 0),
+      // Counted, not assumed. This was hardcoded to 0 while NO_QUANTITY errors
+      // were being pushed into the sheets, so the review screen's Errors tile
+      // read zero over a batch that publishing would refuse.
+      errors: count(sheets, SEVERITY.ERROR),
+      warnings: count(sheets, SEVERITY.WARNING),
       droppedRows: dropped
     }
   };
