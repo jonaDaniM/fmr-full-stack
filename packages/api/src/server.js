@@ -339,10 +339,14 @@ route('GET', /^\/api\/register$/, async (req, res, { url }) => {
   }), res);
 });
 
-route('GET', /^\/api\/iso-summary$/, async (req, res) => {
+route('GET', /^\/api\/iso-summary$/, async (req, res, { url }) => {
   const ctx = await authenticate(req);
   requirePermission(ctx, 'search');
-  await withClient(ctx, (c) => getIsoSummary(c, ctx.projectId), res);
+  await withClient(ctx, (c) => getIsoSummary(c, ctx.projectId, {
+    query: url.searchParams.get('q') || undefined,
+    page: Number(url.searchParams.get('page')) || 1,
+    pageSize: Number(url.searchParams.get('pageSize')) || undefined
+  }), res);
 });
 
 route('GET', /^\/api\/dashboard$/, async (req, res) => {

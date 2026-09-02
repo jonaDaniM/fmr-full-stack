@@ -25,6 +25,7 @@ const state = {
   // somebody back at page 1 of the queue they were working through.
   queuePage: 1, queuePages: null,
   bagPage: 1, bagPages: null,
+  isoPage: 1, isoPages: null, isoQuery: '',
   register: { ...REGISTER_DEFAULTS }, registerPages: null
 };
 
@@ -595,12 +596,27 @@ async function renumber(fmrId, currentNumber) {
 // --- by drawing ------------------------------------------------------------
 
 async function renderIso() {
-  const { drawings } = await api('/api/iso-summary');
+  const params = new URLSearchParams({ page: String(state.isoPage ?? 1) });
+  if (state.isoQuery) params.set('q', state.isoQuery);
+
+  const { drawings, pagination } = await api(`/api/iso-summary?${params}`);
+  state.isoPages = pagination;
+
+  const paged = pagination.totalRecords > drawings.length;
 
   $('view').innerHTML = `
     <div class="stats">
-      <div class="stat"><span class="n">${drawings.length}</span><span class="l">Drawings</span></div>
+      <div class="stat"><span class="n">${n(pagination.totalRecords)}</span>
+        <span class="l">Drawing${pagination.totalRecords === 1 ? '' : 's'}</span>
+        ${state.isoQuery ? '<span class="s">matching</span>' : ''}</div>
     </div>
+
+    <div class="filters">
+      <input type="search" id="isoSearch" class="search-inline"
+        placeholder="Drawing number" value="${esc(state.isoQuery ?? '')}"
+        autocomplete="off" enterkeyhint="search">
+    </div>
+
     <div class="tw"><table>
       <thead><tr>
         <th class="w-md">Drawing</th><th class="w-sm">Sheet</th>
@@ -618,13 +634,19 @@ async function renderIso() {
           <td class="num">${n(d.qtyIssued)}</td>
           <td class="num">${n(d.qtyBackordered)}</td>
           <td>
-            <div class="bar"><i style="width:${Number(d.fulfillmentPct)}%"></i></div>
-            <span class="vh">${esc(d.fulfillmentPct)}% fulfilled</span>
+            <div class="barline">
+              <div class="bar"><i style="width:${Number(d.fulfillmentPct)}%"></i></div>
+              <span class="barpct">${esc(d.fulfillmentPct)}%</span>
+            </div>
           </td>
         </tr>`).join('')
-        || emptyRow(8, 'No material on this project yet.')}
+        || emptyRow(8, state.isoQuery
+          ? 'No drawing matches that.'
+          : 'No material on this project yet.')}
       </tbody>
-    </table></div>`;
+    </table></div>
+
+    ${paged || pagination.totalPages > 1 ? renderPager(pagination) : ''}`;
 }
 
 // --- today -----------------------------------------------------------------
@@ -767,13 +789,17 @@ $('tabs').onclick = (event) => {
  * replaces the box with it.
  */
 $('view').addEventListener('input', debounce(async (event) => {
-  const box = event.target.closest('#bagSearch, #regQuery');
+  const box = event.target.closest('#bagSearch, #regQuery, #isoSearch');
   if (!box) return;
 
   const id = box.id;
   const query = box.value.trim();
 
-  if (id === 'bagSearch') {
+  if (id === 'isoSearch') {
+    if (query === state.isoQuery) return;
+    state.isoQuery = query;
+    state.isoPage = 1;
+  } else if (id === 'bagSearch') {
     if (query === state.bagQuery) return;
     state.bagQuery = query;
     state.bagPage = 1;
@@ -869,6 +895,7 @@ $('view').addEventListener('click', (event) => {
     const page = Number(pager.dataset.page);
     if (state.tab === 'queue') state.queuePage = page;
     else if (state.tab === 'bags') state.bagPage = page;
+    else if (state.tab === 'iso') state.isoPage = page;
     else state.register = { ...state.register, page };
     return show();
   }

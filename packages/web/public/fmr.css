@@ -422,6 +422,25 @@ tr.row-bad td:first-child { box-shadow: inset 3px 0 0 var(--danger); }
 }
 .bar i { display: block; height: 100%; background: var(--accent); }
 
+/* The bar alone read as decoration — a column of grey lines with no way to
+   tell 4% from 40%. The number is the information; the bar is how a page of
+   them is compared at a glance. */
+.barline { display: flex; align-items: center; gap: var(--s-2); }
+.barline .bar { flex: 1; }
+.barpct {
+  font-size: var(--t-xs); color: var(--muted); min-width: 34px;
+  text-align: right; font-variant-numeric: tabular-nums;
+}
+
+/* A search box sitting in a filter row, sized to what is typed into it. */
+.search-inline {
+  font: inherit; font-size: var(--t-sm);
+  padding: 6px var(--s-3); width: min(100%, 260px);
+  border: 1px solid var(--rule-2); border-radius: var(--r-sm);
+  background: var(--card); color: var(--ink);
+}
+.search-inline:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
 /* Editable cells in the draft and import line editors. */
 td[contenteditable] {
   cursor: text;
@@ -780,8 +799,17 @@ button.issue:hover { filter: brightness(0.97); }
        a row of its own. */
     grid-template-columns: repeat(auto-fill, minmax(560px, 1fr));
     gap: var(--s-3);
-    align-items: start;
+    /* stretch, not start: a two-line description on one card and a one-line
+       description on its neighbour put their quantity strips at different
+       heights, and the numbers a crew compares stopped sharing a baseline. */
+    align-items: stretch;
   }
+
+  /* The slack goes above the quantity strip rather than into the text, so a
+     short description keeps its spec line and the strip still sits at the
+     foot of every card in the row. */
+  .fmr-group .card { display: flex; flex-direction: column; }
+  .fmr-group .card .qty { margin-top: auto; }
   /* The header has room to put identity, totals, fill and filter on one
      line instead of stacking them. */
   .fmr-head {
