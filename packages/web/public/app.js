@@ -478,6 +478,7 @@ $('searchForm').onsubmit = async (event) => {
   hint.className = 'hint';
   hint.textContent = 'Searching…';
   hint.hidden = false;
+  hideStandby();
 
   try {
     const { results } = await api(`/api/search?q=${encodeURIComponent(query)}`);
@@ -492,6 +493,93 @@ $('searchForm').onsubmit = async (event) => {
     button.removeAttribute('aria-busy');
   }
 };
+
+/**
+ * What is waiting for this crew, shown before they have searched for anything.
+ *
+ * The screen opened on a search box and an empty page, which says nothing
+ * about whether there is work to do. Bags already hold material somebody has
+ * to hand over, and a notice is the office answering a question a crew asked
+ * — both were reachable only by knowing what to type. Neither replaces
+ * search; they fill the wait before it.
+ *
+ * It never blocks: search works whether or not this ever answers, and a
+ * failure leaves the screen exactly as it was.
+ */
+async function renderStandby() {
+  const standby = $('standby');
+  if (!session.projectId || state.results.length) return;
+
+  let bags, notices;
+  try {
+    [bags, notices] = await Promise.all([
+      api('/api/active-bags?pageSize=6'),
+      api('/api/notices').catch(() => ({ notices: [] }))
+    ]);
+  } catch {
+    return;                            // the search box is still the point
+  }
+
+  // A search landed while this was in flight. Its results are what the crew
+  // asked for, so they win.
+  if (state.results.length) return;
+
+  const waiting = notices?.notices ?? [];
+  const summary = bags?.summary ?? {};
+  const records = bags?.records ?? [];
+  if (!waiting.length && !records.length) return;
+
+  const cards = [];
+
+  if (waiting.length) {
+    cards.push(`
+      <section class="standby-block">
+        <h2 class="standby-h">The office answered you</h2>
+        <ul class="standby-list">
+          ${waiting.slice(0, 4).map((notice) => `
+            <li class="standby-row standby-row-warn">
+              <span class="standby-tag">${esc(notice.fmrNumber ?? '')}</span>
+              <span class="standby-main">${esc(notice.headline ?? notice.kind ?? '')}
+                <span class="standby-where">${esc(notice.description ?? '')}</span></span>
+              <span class="standby-side">${n(notice.qtyOutstanding ?? 0)}</span>
+            </li>`).join('')}
+        </ul>
+      </section>`);
+  }
+
+  if (records.length) {
+    // The count is the whole point — a crew wants to know how much is sitting
+    // in bags, not just see the first six of it.
+    const total = summary.activeTags ?? records.length;
+    cards.push(`
+      <section class="standby-block">
+        <h2 class="standby-h">Bags holding material
+          <span class="standby-count">${n(total)}</span></h2>
+        <ul class="standby-list">
+          ${records.slice(0, 6).map((bag) => `
+            <li class="standby-row">
+              <span class="standby-tag">${esc(bag.tagNumber ?? '')}</span>
+              <span class="standby-main">${esc(bag.description ?? '')}
+                <span class="standby-where">${esc(bag.isoKey ?? bag.fmrNumber ?? '')}</span></span>
+              <span class="standby-side">${n(bag.qtyRemaining ?? 0)} ${esc(bag.uom ?? '')}</span>
+            </li>`).join('')}
+        </ul>
+        ${total > records.length
+          ? `<p class="standby-more">${n(total - records.length)} more on the Office screen.</p>`
+          : ''}
+      </section>`);
+  }
+
+  standby.innerHTML = cards.join('');
+  standby.hidden = false;
+}
+
+/** Search results replace the standby view; it is only for the wait before. */
+function hideStandby() {
+  const standby = $('standby');
+  standby.hidden = true;
+  standby.innerHTML = '';
+}
 
 /**
  * Dropdown values, and whether the project is paused.
@@ -531,7 +619,9 @@ await initShell({
     hint.className = 'hint';
     hint.textContent = 'Search by FMR number, drawing, or what the material is.';
     hint.hidden = false;
+    hideStandby();
     loadOptions();
+    renderStandby();
   }
 });
 
@@ -550,4 +640,7 @@ if (!session.projectId) {
   hint.hidden = false;
 } else {
   await loadOptions();
+  // Not awaited: the search box is usable the moment the page is, and this
+  // fills in underneath it when the server answers.
+  renderStandby();
 }

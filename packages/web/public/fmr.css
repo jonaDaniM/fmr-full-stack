@@ -213,6 +213,30 @@ a { color: var(--accent); }
 .nav-link:hover, .nav-link:focus-visible { color: var(--ink); background: var(--sunk); }
 .nav-link.on { color: var(--accent); background: var(--accent-soft); }
 
+/* Each screen is its own document, so a click is followed by a beat of the
+   browser fetching one. `.going` is the answer to "did that register?" during
+   that beat: the link the crew asked for looks chosen straight away, rather
+   than the whole bar sitting inert until the next page paints. */
+.nav-link.going { color: var(--accent); background: var(--accent-soft); }
+
+/* And a thread of movement across the top, so a slow connection reads as
+   working rather than stuck. It never completes on its own — the new document
+   replacing this one is what ends it. */
+body.navigating::before {
+  content: ''; position: fixed; inset: 0 auto auto 0;
+  height: 2px; width: 100%; z-index: 60;
+  background: var(--accent); transform-origin: 0 50%;
+  animation: nav-progress 2.4s cubic-bezier(0.2, 0.8, 0.3, 1) forwards;
+}
+@keyframes nav-progress {
+  from { transform: scaleX(0); }
+  60%  { transform: scaleX(0.7); }
+  to   { transform: scaleX(0.92); }
+}
+@media (prefers-reduced-motion: reduce) {
+  body.navigating::before { animation: none; transform: scaleX(0.4); }
+}
+
 .bar-end { margin-left: auto; display: flex; align-items: center; gap: var(--s-3); }
 
 .project select {
@@ -383,7 +407,14 @@ tr.row-bad { background: var(--danger-soft); }
 tr.row-bad:hover { background: var(--danger-soft); filter: brightness(0.98); }
 tr.row-bad td:first-child { box-shadow: inset 3px 0 0 var(--danger); }
 
-.rowacts { display: flex; gap: 5px; justify-content: flex-end; flex-wrap: wrap; }
+/* Three decisions on one row. They wrapped two-and-one, which made every row
+   in a 166-row queue taller than it needed to be and left Reject looking like
+   it belonged to the row below. They hold one line and the column is sized to
+   fit them; below a tablet the table scrolls sideways anyway. */
+.rowacts {
+  display: flex; gap: 5px; justify-content: flex-end;
+  flex-wrap: nowrap; white-space: nowrap;
+}
 
 .bar {
   height: 6px; min-width: 66px; border-radius: 3px;
@@ -565,6 +596,72 @@ button.issue:hover { filter: brightness(0.97); }
 .searchbar .btn { height: var(--tap); padding: 0 var(--s-5); }
 
 .list { display: flex; flex-direction: column; gap: var(--s-3); padding: 0 var(--s-4) var(--s-6); }
+
+/* --- the field screen before a search ------------------------------------- */
+/* What is already waiting, in the space the search box used to float in. Read
+   at arm's length on a phone, so the rows are tall and the quantity is the
+   thing that carries weight. */
+
+.standby {
+  width: min(100%, 620px); margin: var(--s-2) auto var(--s-6);
+  padding: 0 var(--s-4);
+  display: flex; flex-direction: column; gap: var(--s-4);
+}
+
+.standby-block {
+  background: var(--card); border: 1px solid var(--rule);
+  border-radius: var(--r-lg); overflow: hidden;
+}
+
+.standby-h {
+  font-family: var(--font-display); font-size: var(--t-sm); font-weight: 600;
+  letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted);
+  margin: 0; padding: var(--s-3) var(--s-4);
+  border-bottom: 1px solid var(--rule);
+  display: flex; align-items: center; justify-content: space-between; gap: var(--s-2);
+}
+
+.standby-count {
+  font-size: var(--t-sm); letter-spacing: 0; color: var(--accent);
+  background: var(--accent-soft); border-radius: var(--r-full);
+  padding: 2px var(--s-2);
+}
+
+.standby-list { list-style: none; margin: 0; padding: 0; }
+
+.standby-row {
+  display: grid; align-items: baseline; gap: var(--s-3);
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  padding: var(--s-3) var(--s-4);
+  border-top: 1px solid var(--rule);
+  font-size: var(--t-sm);
+}
+.standby-row:first-child { border-top: 0; }
+.standby-row-warn { background: var(--warn-soft); }
+
+.standby-tag {
+  font-family: var(--font-mono); font-size: var(--t-xs);
+  color: var(--muted); white-space: nowrap;
+}
+
+/* The description can be long and the drawing number below it must not be
+   pushed out of the row by it. */
+.standby-main { min-width: 0; color: var(--ink); }
+.standby-where {
+  display: block; font-size: var(--t-xs); color: var(--muted);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+.standby-side {
+  font-weight: 600; color: var(--ink); white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.standby-more {
+  margin: 0; padding: var(--s-3) var(--s-4);
+  border-top: 1px solid var(--rule);
+  font-size: var(--t-xs); color: var(--muted);
+}
 
 /* What happened to a line, newest first. A correction is not deleted from the
    record, so it appears as its own entry and is marked rather than hidden. */
@@ -785,3 +882,59 @@ button.issue:hover { filter: brightness(0.97); }
   border-radius: var(--r-md); box-shadow: var(--shadow-2);
 }
 .publishbar .spacer { margin-left: auto; }
+
+/* --- field notes on the FMR drill-down -------------------------------------- */
+
+/* What the crew wrote, under the material it was written about. Indented and
+   quiet: it is context for the quantities beside it, not a column of its own. */
+.notes { list-style: none; margin: var(--s-2) 0 0; padding: 0 0 0 var(--s-3);
+         border-left: 2px solid var(--rule); }
+.notes li { margin-bottom: var(--s-2); font-size: var(--t-sm); line-height: 1.45; }
+.notes li:last-child { margin-bottom: 0; }
+.note-what { display: block; color: var(--muted); font-size: var(--t-xs); }
+.note-text { display: block; color: var(--ink); }
+
+/* The active-bag search sits in the same row as its filter buttons. */
+.bag-search {
+  font: inherit; font-size: var(--t-sm); padding: 6px var(--s-3);
+  background: var(--card); color: var(--ink); min-width: 15rem;
+  border: 1px solid var(--rule); border-radius: var(--r-full);
+}
+.bag-search:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+/* Visible to a screen reader, not on screen.
+   Three screens already used `.vh` for the label of a control whose purpose is
+   otherwise only conveyed by its position — but it was never defined, so that
+   text was simply on display. */
+.vh {
+  position: absolute; width: 1px; height: 1px; overflow: hidden;
+  clip-path: inset(50%); white-space: nowrap; border: 0; padding: 0; margin: -1px;
+}
+
+/* --- register filters and paging -------------------------------------------- */
+
+/* One row of controls above the register. It wraps rather than scrolls: an
+   expeditor on a laptop should see every control without hunting for it. */
+.regfilters {
+  display: flex; flex-wrap: wrap; gap: var(--s-2);
+  align-items: center; margin-bottom: var(--s-4);
+}
+.regfilters label { display: flex; }
+.regfilters select, .regfilters input[type='search'] {
+  font: inherit; font-size: var(--t-sm); padding: 6px var(--s-3);
+  background: var(--card); color: var(--ink);
+  border: 1px solid var(--rule); border-radius: var(--r-full);
+}
+.regfilters select:focus-visible, .regfilters input:focus-visible {
+  outline: 2px solid var(--accent); outline-offset: 1px;
+}
+/* The search is the control people reach for first, so it gets the room. */
+.regfilters .regsearch { flex: 1 1 18rem; min-width: 12rem; }
+.regfilters .regsearch input { width: 100%; }
+#regDirection { font-variant: normal; min-width: 2.25rem; }
+
+.pager {
+  display: flex; align-items: center; justify-content: flex-end;
+  gap: var(--s-3); margin-top: var(--s-3);
+}
+.pager button[disabled] { opacity: 0.4; cursor: default; }

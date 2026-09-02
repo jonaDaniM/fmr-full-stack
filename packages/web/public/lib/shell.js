@@ -14,6 +14,7 @@ import { api, ApiError, setProjectId } from './api.js';
 import { esc } from './dom.js';
 
 const PROJECT_KEY = 'fmr.project';
+const SESSION_KEY = 'fmr.session';
 
 /** Every screen, what it is for, and who may see it. */
 export const SCREENS = [
@@ -56,6 +57,20 @@ export const session = {
  * reload without re-implementing the bootstrap.
  */
 export async function initShell({ current, onProjectChange } = {}) {
+  // Draw the bar before asking the server who we are. Each screen is its own
+  // document, so without this the topbar is missing for a whole round trip on
+  // every navigation and the app appears to flash apart and reassemble. The
+  // cached copy is only ever used to paint; `/api/me` still decides what is
+  // true, and the bar is redrawn from the answer below.
+  const cached = readCachedSession();
+  if (cached) {
+    session.user = cached.user;
+    session.projects = cached.projects ?? [];
+    session.projectId = pickProject(cached.projects ?? []);
+    setProjectId(session.projectId);
+    renderBar(current, onProjectChange);
+  }
+
   let me;
   try {
     me = await api('/api/me');
@@ -67,21 +82,58 @@ export async function initShell({ current, onProjectChange } = {}) {
       renderFatal(failure.message);
       throw failure;
     }
+    // The session is gone, so the cached copy of it is a lie. Leaving it would
+    // paint a signed-in bar for the next visitor at this browser.
+    forgetSession();
     location.href = `/signin.html?next=${encodeURIComponent(location.pathname)}`;
     throw failure;
   }
 
   session.user = me.user;
   session.projects = me.projects ?? [];
-
-  const remembered = localStorage.getItem(PROJECT_KEY);
-  const known = session.projects.some((p) => p.projectId === remembered);
-  session.projectId = known ? remembered : session.projects[0]?.projectId ?? null;
+  session.projectId = pickProject(session.projects);
   setProjectId(session.projectId);
 
+  rememberSession(me);
   renderBar(current, onProjectChange);
 
   return session;
+}
+
+/** The remembered project if it is still one of ours, else the first. */
+function pickProject(projects) {
+  const remembered = localStorage.getItem(PROJECT_KEY);
+  const known = projects.some((p) => p.projectId === remembered);
+  return known ? remembered : projects[0]?.projectId ?? null;
+}
+
+/**
+ * The session, kept only to paint the bar on the next screen.
+ *
+ * sessionStorage rather than localStorage: it dies with the tab, so a shared
+ * warehouse terminal does not show the last person's name to the next one.
+ * Every read is guarded — a browser set to block storage throws on access.
+ */
+function readCachedSession() {
+  try {
+    const raw = sessionStorage.getItem(SESSION_KEY);
+    const parsed = raw ? JSON.parse(raw) : null;
+    return parsed?.user ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function rememberSession(me) {
+  try {
+    sessionStorage.setItem(SESSION_KEY, JSON.stringify({
+      user: me.user, projects: me.projects ?? []
+    }));
+  } catch { /* private mode, a full quota — the bar just paints a beat later */ }
+}
+
+export function forgetSession() {
+  try { sessionStorage.removeItem(SESSION_KEY); } catch { /* nothing to undo */ }
 }
 
 function renderBar(current, onProjectChange) {
@@ -155,6 +207,7 @@ function renderBar(current, onProjectChange) {
 
   document.getElementById('shell-signout').onclick = async () => {
     await fetch('/api/auth/signout', { method: 'POST' });
+    forgetSession();
     location.href = '/signin.html';
   };
 
@@ -162,6 +215,26 @@ function renderBar(current, onProjectChange) {
   document.addEventListener('click', (event) => {
     const account = bar.querySelector('.account[open]');
     if (account && !account.contains(event.target)) account.open = false;
+  });
+
+  // Moving between screens is a real page load, so there is a beat where the
+  // browser has left one document and not yet painted the next. Marking the
+  // link that was clicked means the answer to "did that register?" is on
+  // screen during that beat, instead of nothing happening until it does.
+  bar.querySelector('.nav')?.addEventListener('click', (event) => {
+    const link = event.target.closest('.nav-link');
+    if (!link || link.classList.contains('on')) return;
+    if (event.metaKey || event.ctrlKey || event.shiftKey || event.button !== 0) return;
+    for (const other of bar.querySelectorAll('.nav-link')) other.classList.remove('going');
+    link.classList.add('going');
+    document.body.classList.add('navigating');
+  });
+
+  // Coming back with the back button reuses the old document, still wearing
+  // the mark from when it was left.
+  addEventListener('pageshow', () => {
+    document.body.classList.remove('navigating');
+    for (const link of bar.querySelectorAll('.nav-link')) link.classList.remove('going');
   });
 }
 
