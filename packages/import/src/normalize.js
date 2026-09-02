@@ -138,16 +138,19 @@ export function inferUom(description, explicit, rawQuantity) {
   // A pipe support names the pipe it holds — "U-BOLT GUIDE FOR 2\" PIPE" is
   // one bolt, not two feet of anything. These are counted, and the word PIPE
   // in them is describing what they attach to.
-  if (/\b(SUPPORT|GUIDE|CRADLE|HANGER|CLAMP|SHOE|U-BOLT|UBOLT|BRACKET|ANCHOR|TRUNNION|SADDLE|STANCHION|BASE|SPACER|SHIELD|STRAP)\b/.test(text)) {
+  if (/\b(SUPPORTS?|GUIDES?|CRADLES?|HANGERS?|CLAMPS?|SHOES?|U-BOLTS?|UBOLTS?|BRACKETS?|ANCHORS?|TRUNNIONS?|SADDLES?|STANCHIONS?|BASES?|SPACERS?|SHIELDS?|STRAPS?)\b/.test(text)) {
     return { uom: 'EA', rule: 'pipe support' };
   }
 
   // Likewise a fitting sized against a pipe: an elbow is counted.
-  if (/\b(ELL|ELBOW|TEE|REDUCER|COUPLING|UNION|FLANGE|NIPPLE|PLUG|CAP|VALVE|BOLT|NUT|GASKET|STUD|SCREW|WASHER|ADAPTER|CONNECTION|CAMLOCK|FITTING)\b/.test(text)) {
+  if (/\b(ELLS?|ELBOWS?|TEES?|REDUCERS?|COUPLINGS?|UNIONS?|FLANGES?|NIPPLES?|PLUGS?|CAPS?|VALVES?|BOLTS?|NUTS?|GASKETS?|STUDS?|SCREWS?|WASHERS?|ADAPTERS?|CONNECTIONS?|CAMLOCKS?|FITTINGS?)\b/.test(text)) {
     return { uom: 'EA', rule: 'fitting' };
   }
 
-  if (/\b(PIPE|TUBE|TUBING|HOSE|CABLE|WIRE|INSULATION)\b/.test(text)) {
+  // Plurals count. One drafting office writes "PIPE STD WT ERW STL A53-B" and
+  // another "Pipes, Seamless, ASME B36.10" — 271 rows of real pipe on the 6820
+  // project were ordered by the each because only the singular matched.
+  if (/\b(PIPES?|TUBES?|TUBING|HOSES?|CABLES?|WIRES?|INSULATION)\b/.test(text)) {
     return { uom: 'FT', rule: 'length material' };
   }
   if (/\b(PAINT|PRIMER|SOLVENT|OIL|GREASE)\b/.test(text)) {
