@@ -72,7 +72,7 @@ function describeReason(reason) {
  * matches an issue to its line by `sourceRow`, so an issue carrying a
  * different one cannot highlight anything.
  */
-export function reviewReasonIssues(reasons, lineNumber) {
+export function reviewReasonIssues(reasons, lineNumber, sourceRow = lineNumber) {
   return (reasons ?? []).map((reason) => {
     const { severity, say } = describeReason(reason);
     return {
@@ -80,7 +80,7 @@ export function reviewReasonIssues(reasons, lineNumber) {
       code: reason.toUpperCase(),
       message: `Line ${lineNumber}: ${say}.`,
       row: lineNumber,
-      sourceRow: lineNumber
+      sourceRow
     };
   });
 }
@@ -95,6 +95,12 @@ function toSheet(drawing, iwpNumber) {
     const lineNumber = lines.length + 1;
     const description = clean(material.description);
 
+    // What to look for on the sheet when this row seems wrong. The drawing
+    // prints a point number against every BOM row, so that is the anchor a
+    // person checking it can actually use — the line's own position tells
+    // them nothing they cannot already see.
+    const sourceRow = clean(material.pointNumber) || String(lineNumber);
+
     // The parser hands back what it read, as text. Everything numeric or
     // dimensional goes through the shared normalisers — a quantity of "138.4'"
     // is 138.4 feet, and "16X16" is a reducer with two bores. Those rules were
@@ -104,7 +110,7 @@ function toSheet(drawing, iwpNumber) {
 
     lines.push({
       lineNumber,
-      sourceRow: lineNumber,
+      sourceRow,
       pointNumber: clean(material.pointNumber) || null,
       commodityCode: clean(material.commodityCode) || null,
       size: normalizeSize(material.nominalSize),
@@ -117,7 +123,7 @@ function toSheet(drawing, iwpNumber) {
       confidence: null
     });
 
-    issues.push(...reviewReasonIssues(material.reviewReasons, lineNumber));
+    issues.push(...reviewReasonIssues(material.reviewReasons, lineNumber, sourceRow));
   }
 
   // A page the parser could not read is not silently dropped: a drawing that
