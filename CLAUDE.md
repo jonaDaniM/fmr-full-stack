@@ -78,7 +78,7 @@ tokens; per-screen CSS files hold only what one screen needs.
 
 ## Reading drawings
 
-Drawing PDFs are read by `../Archive`, a Python project, spawned from
+Drawing PDFs are read by `packages/extract-iso`, a Python package, spawned from
 `packages/import/src/runner.js`. That module is the only place in the system
 that starts a process or writes to disk, and it should stay that way:
 arguments are passed as an array with no shell, uploaded filenames are reduced
@@ -89,7 +89,7 @@ returns; the browser polls. A job left running by a restart is failed on boot,
 or the browser waits forever.
 
 ```bash
-cd ../Archive && python3 -m venv .venv && .venv/bin/pip install -e .
+cd packages/extract-iso && python3 -m venv .venv && .venv/bin/pip install -e .
 ```
 
 Without that venv the app runs and only drawing upload refuses.

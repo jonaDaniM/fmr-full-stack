@@ -15,6 +15,8 @@ import {
   normalizeIso, normalizeSheet, normalizeQuantity, normalizeSize, inferUom
 } from './normalize.js';
 import { SEVERITY } from './extract.js';
+import { timeSaved, describeTimeSaved, isOverflowDescription }
+  from '../../core/src/domain/timeSaved.js';
 
 const clean = (v) => String(v ?? '').trim();
 
@@ -223,6 +225,11 @@ export function toDraftSheets(payload) {
   const count = (severity) => sheets.reduce(
     (total, sheet) => total + sheet.issues.filter((i) => i.severity === severity).length, 0);
 
+  // A description that overruns its cell costs more to type by hand, which is
+  // the one thing the time model needs from the rows themselves.
+  const overflowRows = sheets.reduce((total, sheet) => total
+    + sheet.lines.filter((l) => isOverflowDescription(l.description)).length, 0);
+
   // "lines to check" has to mean lines. An issue about the whole drawing — a
   // proposed FMR number, a page set aside — is not one, and counting it makes
   // the sentence say something untrue about the table underneath it.
@@ -244,7 +251,14 @@ export function toDraftSheets(payload) {
       droppedRows: dropped,
       iwpNumber: clean(payload?.iwpNumber) || null,
       pdfsDiscovered: Number(payload?.pdfsDiscovered) || 0,
-      quarantined: (payload?.quarantine ?? []).length
+      quarantined: (payload?.quarantine ?? []).length,
+      // What this would have cost somebody to type. The case for the system is
+      // made in hours, so the hours are worth reporting.
+      timeSaved: timeSaved({
+        drawings: sheets.length,
+        rows: sheets.reduce((total, s) => total + s.lines.length, 0),
+        overflowRows
+      })
     }
   };
 }
@@ -270,5 +284,7 @@ export function describePackage(summary) {
     parts.push(`${summary.droppedRows} drawing${summary.droppedRows === 1 ? '' : 's'} skipped`);
   }
 
-  return parts.join(', ');
+  const saved = describeTimeSaved(summary.timeSaved);
+  const read = parts.join(', ');
+  return saved ? `${read} — ${saved}` : read;
 }
