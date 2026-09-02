@@ -1,10 +1,11 @@
 /**
  * Import.
  *
- * Two kinds of file arrive here. A workbook of FMRs, which is what the office
- * has always produced. And the CSV that extract_materials.py writes after
- * reading drawings — same destination, different reader, and the page picks
- * between them by looking at what was actually dropped.
+ * Three kinds of file arrive here. A workbook of FMRs, which is what the office
+ * has always produced. The CSV that extract_materials.py writes after reading
+ * drawings. And the drawing PDFs themselves, which the server reads directly.
+ * Same destination, different readers, and the page picks between them by
+ * looking at what was actually dropped.
  *
  * Either way nothing is created until a person has read it. That is the whole
  * point of this screen.
@@ -16,7 +17,7 @@ import { confirmAction } from './lib/modal.js';
 import { toast, toastError } from './lib/toast.js';
 import { initShell } from './lib/shell.js';
 
-const state = { batch: null, extraction: null };
+const state = { batch: null, extraction: null, polling: null };
 
 // --- upload ----------------------------------------------------------------
 
@@ -24,19 +25,20 @@ function renderDrop(message = null) {
   $('view').innerHTML = `
     ${message ? `<div class="issue issue-error" style="margin-bottom:var(--s-4)">${esc(message)}</div>` : ''}
     <div class="drop" id="drop">
-      <h2>Drop a file here</h2>
-      <p>An FMR workbook, or the CSV that the drawing extractor writes.
-         Nothing is created until you have reviewed it.</p>
-      <input id="file" type="file" accept=".xlsx,.xls,.csv">
-      <label for="file" class="btn btn-primary">Choose file</label>
+      <h2>Drop files here</h2>
+      <p>Drawing PDFs, an FMR workbook, or the CSV that the drawing extractor
+         writes. Nothing is created until you have reviewed it.</p>
+      <input id="file" type="file" accept=".pdf,.xlsx,.xls,.csv" multiple>
+      <label for="file" class="btn btn-primary">Choose files</label>
     </div>
-    <p class="hint">Workbooks are read one sheet per FMR. An extraction CSV is
-       read one drawing per FMR, and every line carries the page it came from.</p>`;
+    <p class="hint">Drop a whole IWP package of drawings at once — the material
+       on each one becomes an FMR to check. Workbooks are read one sheet per
+       FMR, and an extraction CSV one drawing per FMR.</p>`;
 
   const drop = $('drop');
   const file = $('file');
 
-  file.onchange = () => file.files[0] && send(file.files[0]);
+  file.onchange = () => send([...file.files]);
 
   for (const event of ['dragenter', 'dragover']) {
     drop.addEventListener(event, (e) => { e.preventDefault(); drop.classList.add('over'); });
@@ -45,10 +47,7 @@ function renderDrop(message = null) {
     drop.addEventListener(event, (e) => { e.preventDefault(); drop.classList.remove('over'); });
   }
 
-  drop.addEventListener('drop', (e) => {
-    const dropped = e.dataTransfer?.files?.[0];
-    if (dropped) send(dropped);
-  });
+  drop.addEventListener('drop', (e) => send([...(e.dataTransfer?.files ?? [])]));
 }
 
 /**
@@ -63,14 +62,80 @@ function looksExtracted(text) {
   return header.includes('source_pdf') && header.includes('confidence');
 }
 
-async function send(file) {
+/**
+ * Lay several files end to end for one upload.
+ *
+ * A package is many drawings and the server has no multipart parser, so each
+ * file is preceded by a header naming the length of its name and its data.
+ */
+function frameFiles(files) {
+  const parts = [];
+  let total = 0;
+
+  for (const { name, buffer } of files) {
+    const encoded = new TextEncoder().encode(name);
+    const header = new DataView(new ArrayBuffer(8));
+    header.setUint32(0, encoded.byteLength);
+    header.setUint32(4, buffer.byteLength);
+    parts.push(new Uint8Array(header.buffer), encoded, new Uint8Array(buffer));
+    total += 8 + encoded.byteLength + buffer.byteLength;
+  }
+
+  const body = new Uint8Array(total);
+  let at = 0;
+  for (const part of parts) { body.set(part, at); at += part.byteLength; }
+  return body.buffer;
+}
+
+async function send(chosen) {
+  if (!chosen.length) return;
+
+  const pdfs = chosen.filter((f) => /\.pdf$/i.test(f.name));
+
+  // Drawings are read by the server and take a while, so they go their own
+  // way. Anything else is a single file read inside the request.
+  if (pdfs.length) return sendDrawings(pdfs);
+  return sendOneFile(chosen[0]);
+}
+
+/** A package of drawings: uploaded, then read in the background. */
+async function sendDrawings(files) {
+  renderUploading(
+    `${files.length} drawing${files.length === 1 ? '' : 's'}`,
+    'Sending the drawings…'
+  );
+
+  const loaded = await Promise.all(
+    files.map(async (f) => ({ name: f.name, buffer: await f.arrayBuffer() }))
+  );
+
+  try {
+    const started = await uploadWithProgress(
+      '/api/import/drawings',
+      frameFiles(loaded),
+      {
+        onProgress: (fraction) => {
+          const bar = $('progress');
+          if (bar) bar.style.width = `${Math.round(fraction * 100)}%`;
+          if (fraction === 1) $('uploadWhat').textContent = 'Reading the drawings…';
+        }
+      }
+    );
+    watchJob(started.jobId, files.length);
+  } catch (failure) {
+    renderDrop(failure.message);
+  }
+}
+
+/** A workbook or a CSV: read inside the request, as it always was. */
+async function sendOneFile(file) {
   const buffer = await file.arrayBuffer();
 
   // A CSV could be either kind, so read the header before choosing a route.
   const extracted = /\.csv$/i.test(file.name)
     && looksExtracted(new TextDecoder().decode(buffer.slice(0, 400)));
 
-  renderUploading(file.name, extracted);
+  renderUploading(file.name, extracted ? 'Sending the extraction…' : 'Sending the workbook…');
 
   const path = extracted
     ? `/api/import/extracted?filename=${encodeURIComponent(file.name)}`
@@ -96,12 +161,56 @@ async function send(file) {
   }
 }
 
-function renderUploading(filename, extracted) {
+/**
+ * Wait for the server to finish reading a package.
+ *
+ * The upload ended when the bytes landed; the reading carries on behind it, so
+ * the page asks how it is going until there is a batch to review.
+ */
+function watchJob(jobId, fileCount) {
+  const startedAt = Date.now();
+  renderReading(fileCount, 0);
+
+  clearInterval(state.polling);
+  state.polling = setInterval(async () => {
+    let job;
+    try {
+      job = await api(`/api/import/jobs/${jobId}`);
+    } catch (failure) {
+      clearInterval(state.polling);
+      return renderDrop(failure.message);
+    }
+
+    if (job.status === 'Running') {
+      return renderReading(fileCount, Math.round((Date.now() - startedAt) / 1000));
+    }
+
+    clearInterval(state.polling);
+
+    if (job.status === 'Failed') return renderDrop(job.message);
+
+    state.extraction = job.message ?? null;
+    loadBatch(job.batchId).catch((failure) => renderDrop(failure.message));
+  }, 1000);
+}
+
+function renderUploading(what, saying) {
   $('view').innerHTML = `
     <div class="drop">
-      <h2>${esc(filename)}</h2>
-      <p id="uploadWhat">${extracted ? 'Sending the extraction…' : 'Sending the workbook…'}</p>
+      <h2>${esc(what)}</h2>
+      <p id="uploadWhat">${esc(saying)}</p>
       <div class="progress"><i id="progress" style="width:0%"></i></div>
+    </div>`;
+}
+
+/** The wait while the server reads a package, with something honest on screen. */
+function renderReading(fileCount, seconds) {
+  $('view').innerHTML = `
+    <div class="drop">
+      <h2>Reading ${esc(fileCount)} drawing${fileCount === 1 ? '' : 's'}</h2>
+      <p>Finding the material on each one. This does not need you to wait here —
+         the drafts will be in the queue either way.</p>
+      <p class="hint">${esc(seconds)} second${seconds === 1 ? '' : 's'} so far</p>
     </div>`;
 }
 
@@ -357,6 +466,11 @@ await initShell({
       });
       if (!sure) return false;
     }
+    // A package still being read belongs to the project it was sent to. Stop
+    // asking after it, or the next poll reports "not found" against the new
+    // project and reads as an error the user caused.
+    clearInterval(state.polling);
+    state.polling = null;
     state.batch = null;
     state.extraction = null;
     renderDrop();

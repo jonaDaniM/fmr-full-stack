@@ -45,6 +45,9 @@ import {
 import { getBootstrap } from '../../core/src/services/bootstrap.js';
 import { readWorkbook } from '../../import/src/workbook.js';
 import { groupExtractedRows, describeExtraction } from '../../import/src/extracted.js';
+import {
+  startJob, runJob, getJob, failAbandonedJobs
+} from '../../import/src/extractionJobs.js';
 import { readFile as readProfileFile } from 'node:fs/promises';
 import {
   authenticate, require as requirePermission, verifyGoogleToken,
@@ -349,6 +352,44 @@ route('GET', /^\/api\/lines\/([0-9a-f-]{36})\/history$/, async (req, res, { matc
 
 // --- import ----------------------------------------------------------------
 
+/**
+ * Pull several uploaded files out of one body.
+ *
+ * There is no multipart parser here and adding one would mean a dependency, so
+ * a package is sent as its files laid end to end, each preceded by a header
+ * naming its length and filename:
+ *
+ *     <name length: 4 bytes BE><data length: 4 bytes BE><name><data>
+ *
+ * Anything malformed is refused outright rather than read as far as it parses
+ * — a truncated upload is not a smaller package.
+ */
+function unframeFiles(body) {
+  const files = [];
+  let at = 0;
+
+  while (at < body.length) {
+    if (at + 8 > body.length) throw new LedgerError('That upload was incomplete.', 'BAD_UPLOAD');
+
+    const nameLength = body.readUInt32BE(at);
+    const dataLength = body.readUInt32BE(at + 4);
+    at += 8;
+
+    // A length that runs past the end means the body was cut short or is not
+    // in this format at all.
+    if (nameLength > 1024 || at + nameLength + dataLength > body.length) {
+      throw new LedgerError('That upload was incomplete.', 'BAD_UPLOAD');
+    }
+
+    const name = body.subarray(at, at + nameLength).toString('utf8');
+    at += nameLength;
+    files.push({ name, data: body.subarray(at, at + dataLength) });
+    at += dataLength;
+  }
+
+  return files;
+}
+
 /** Load a project's extraction profile, falling back to the baseline. */
 async function loadProfile(name) {
   const dir = join(dirname(fileURLToPath(import.meta.url)), '../../import/profiles');
@@ -441,6 +482,63 @@ route('POST', /^\/api\/import\/extracted$/, async (req, res, { url }) => {
   });
 
   json(res, 200, { ...result, summary, description: describeExtraction(summary) });
+});
+
+/**
+ * Read a package of drawing PDFs and stage what it holds.
+ *
+ * The files arrive as one body, each framed by its length, because there is no
+ * multipart parser here and a package is several drawings at once. Reading
+ * them takes longer than a request should be held open, so the work is
+ * recorded and started, and the browser is given a job to poll.
+ */
+route('POST', /^\/api\/import\/drawings$/, async (req, res, { url }) => {
+  const ctx = await authenticate(req);
+  requirePermission(ctx, 'ownerEdit');
+
+  const client = await pool.connect();
+  try {
+    await assertImportOpen(client, ctx.projectId);
+  } finally {
+    client.release();
+  }
+
+  const chunks = [];
+  let size = 0;
+  for await (const chunk of req) {
+    size += chunk.length;
+    // A package of drawings is bigger than a workbook: 20 real ISO sheets run
+    // to about 10 MB, and packages vary.
+    if (size > 100_000_000) {
+      throw new LedgerError('That package is too large.', 'TOO_LARGE');
+    }
+    chunks.push(chunk);
+  }
+  if (!size) throw new LedgerError('No drawings were uploaded.', 'NO_FILE');
+
+  const files = unframeFiles(Buffer.concat(chunks));
+  if (!files.length) throw new LedgerError('No drawings were uploaded.', 'NO_FILE');
+
+  const iwpNumber = (url.searchParams.get('iwp') ?? '').trim();
+  const sourceName = url.searchParams.get('filename')
+    ?? `${files.length} drawing${files.length === 1 ? '' : 's'}`;
+
+  const jobId = await startJob(ctx, {
+    sourceName, fileCount: files.length, iwpNumber
+  });
+
+  // Deliberately not awaited: the answer is the job id, and the reading
+  // carries on behind it. runJob records its own failures and never rejects.
+  runJob(ctx, jobId, files, { iwpNumber, sourceName });
+
+  json(res, 202, { jobId, fileCount: files.length });
+});
+
+/** How a package being read is getting on. */
+route('GET', /^\/api\/import\/jobs\/([0-9a-f-]{36})$/, async (req, res, { match }) => {
+  const ctx = await authenticate(req);
+  requirePermission(ctx, 'ownerEdit');
+  json(res, 200, await getJob(ctx.projectId, match[1]));
 });
 
 route('GET', /^\/api\/import\/([0-9a-f-]{36})$/, async (req, res, { match }) => {
@@ -773,4 +871,10 @@ const server = http.createServer(async (req, res) => {
 });
 
 const port = Number(process.env.PORT ?? 3000);
+
+// A drawing extraction lives in this process. If it restarted mid-read the
+// job is not coming back, and a browser polling it would wait forever.
+await failAbandonedJobs().catch((error) =>
+  console.error('could not close out abandoned extraction jobs:', error));
+
 server.listen(port, () => console.log(`fmr api listening on ${port}`));

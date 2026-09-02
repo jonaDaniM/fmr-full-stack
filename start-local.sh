@@ -16,6 +16,17 @@ export SESSION_SECRET="${SESSION_SECRET:-local-development-only}"
 export FMR_DEV_LOGIN=1
 export PORT="${PORT:-3000}"
 
+# The drawing reader is Python and lives beside this checkout. If its venv is
+# not there the app still runs; only the drawing upload refuses, and says so.
+EXTRACT_HOME="${FMR_EXTRACT_HOME:-$(cd .. && pwd)/Archive}"
+export FMR_EXTRACT_HOME="$EXTRACT_HOME"
+if [[ -x "$EXTRACT_HOME/.venv/bin/python" ]]; then
+  export FMR_PYTHON="${FMR_PYTHON:-$EXTRACT_HOME/.venv/bin/python}"
+else
+  echo "note: no drawing reader at $EXTRACT_HOME/.venv — PDF upload will be unavailable"
+  echo "      cd '$EXTRACT_HOME' && python3 -m venv .venv && .venv/bin/pip install -e ."
+fi
+
 if ! pg_isready -q 2>/dev/null; then
   echo "PostgreSQL is not running. Start it with:"
   echo "  brew services start postgresql@17"
