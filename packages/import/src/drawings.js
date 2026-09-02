@@ -86,7 +86,7 @@ export function reviewReasonIssues(reasons, lineNumber) {
 }
 
 /** One drawing's material, as draft lines plus whatever needs checking. */
-function toSheet(drawing) {
+function toSheet(drawing, iwpNumber) {
   const isoNumber = normalizeIso(drawing.drawingNumber);
   const lines = [];
   const issues = [];
@@ -144,9 +144,25 @@ function toSheet(drawing) {
     });
   }
 
+  // A drawing does not carry an FMR number — the office issues those. One is
+  // proposed from the drawing so the reviewer has something to accept or edit
+  // rather than an empty box, and it is flagged either way: publishing under a
+  // number nobody chose is how two FMRs end up meaning the same thing.
+  const fmrNumber = isoNumber;
+  issues.push({
+    severity: SEVERITY.WARNING,
+    code: 'PROPOSED_FMR_NUMBER',
+    message: `This FMR is proposed as ${fmrNumber}, after the drawing. `
+      + 'Change it if the office numbers these differently.',
+    row: null,
+    sourceRow: null
+  });
+
   return {
     sheetName: isoNumber,
     header: {
+      fmrNumber,
+      iwpNumber: iwpNumber || null,
       isoNumber,
       // Each PDF here is one sheet of its own drawing, so unless the number
       // says otherwise this is sheet 01 — the same default the workbook
@@ -169,6 +185,7 @@ function toSheet(drawing) {
  */
 export function toDraftSheets(payload) {
   const drawings = payload?.drawings ?? [];
+  const iwpNumber = clean(payload?.iwpNumber);
   const sheets = [];
   let dropped = 0;
 
@@ -179,7 +196,7 @@ export function toDraftSheets(payload) {
       dropped++;
       continue;
     }
-    sheets.push(toSheet(drawing));
+    sheets.push(toSheet(drawing, iwpNumber));
   }
 
   // Pages the parser set aside — a weld log, an image-only sheet needing OCR.
@@ -200,6 +217,16 @@ export function toDraftSheets(payload) {
   const count = (severity) => sheets.reduce(
     (total, sheet) => total + sheet.issues.filter((i) => i.severity === severity).length, 0);
 
+  // "lines to check" has to mean lines. An issue about the whole drawing — a
+  // proposed FMR number, a page set aside — is not one, and counting it makes
+  // the sentence say something untrue about the table underneath it.
+  const linesToCheck = new Set();
+  for (const sheet of sheets) {
+    for (const issue of sheet.issues) {
+      if (issue.sourceRow != null) linesToCheck.add(`${sheet.sheetName}:${issue.sourceRow}`);
+    }
+  }
+
   return {
     sheets,
     summary: {
@@ -207,6 +234,7 @@ export function toDraftSheets(payload) {
       lines: sheets.reduce((total, s) => total + s.lines.length, 0),
       errors: count(SEVERITY.ERROR),
       warnings: count(SEVERITY.WARNING),
+      linesToCheck: linesToCheck.size,
       droppedRows: dropped,
       iwpNumber: clean(payload?.iwpNumber) || null,
       pdfsDiscovered: Number(payload?.pdfsDiscovered) || 0,
@@ -227,7 +255,7 @@ export function describePackage(summary) {
     `${summary.lines} material line${summary.lines === 1 ? '' : 's'}`
   ];
 
-  const toCheck = summary.errors + summary.warnings;
+  const toCheck = summary.linesToCheck ?? 0;
   if (toCheck) parts.push(`${toCheck} line${toCheck === 1 ? '' : 's'} to check`);
   if (summary.quarantined) {
     parts.push(`${summary.quarantined} page${summary.quarantined === 1 ? '' : 's'} set aside`);

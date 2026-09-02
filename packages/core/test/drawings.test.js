@@ -99,7 +99,26 @@ test('a missing quantity blocks publishing; a missing code does not', () => {
   assert.equal(doubt.severity, 'warning', 'a description is still searchable');
 
   assert.equal(summary.errors, 1);
-  assert.equal(summary.warnings, 1);
+  assert.equal(summary.linesToCheck, 2, 'both lines want a person to look');
+});
+
+test('a drawing proposes an FMR number, and says that it did', () => {
+  // A drawing carries no FMR number. One is proposed from the drawing so the
+  // reviewer has something to accept or change, and flagged so it is never
+  // published as though the office had chosen it.
+  const { sheets } = toDraftSheets(payload([row()]));
+  assert.equal(sheets[0].header.fmrNumber, 'LP1Y-CHWR-033047-02');
+  assert.equal(sheets[0].header.iwpNumber, 'IWP-88-014', 'the package names it');
+
+  const flag = sheets[0].issues.find((i) => i.code === 'PROPOSED_FMR_NUMBER');
+  assert.equal(flag.severity, 'warning', 'a proposal does not block publishing');
+});
+
+test('a whole-drawing note is not counted as a line to check', () => {
+  // "2 lines to check" over a table of 2 clean lines would be a lie.
+  const { summary } = toDraftSheets(payload([row(), row({ pointNumber: '2' })]));
+  assert.equal(summary.linesToCheck, 0);
+  assert.ok(summary.warnings > 0, 'the proposed number is still reported');
 });
 
 test('an issue anchors to the same row as the line it is about', () => {
