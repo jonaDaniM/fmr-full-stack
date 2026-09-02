@@ -21,6 +21,7 @@ RUN npm ci --omit=dev
 
 COPY packages/extract-iso/pyproject.toml packages/extract-iso/
 COPY packages/extract-iso/src packages/extract-iso/src
+COPY packages/extract-iso/templates packages/extract-iso/templates
 RUN python3 -m venv /opt/reader \
  && /opt/reader/bin/pip install --no-cache-dir ./packages/extract-iso
 

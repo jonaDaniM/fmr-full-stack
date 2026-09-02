@@ -229,11 +229,12 @@ Quantities and sizes can be corrected in the review screen.
 ### Drawings
 
 Drop an IWP package of drawing PDFs on the import screen and the material on
-each one becomes an FMR to check. The reading is done by `../Archive`, a
-Python project that takes the bill of materials off the sheet:
+each one becomes an FMR to check. The reading is done by
+`packages/extract-iso`, a Python package that takes the bill of materials off
+the sheet:
 
 ```bash
-cd ../Archive
+cd packages/extract-iso
 python3 -m venv .venv && .venv/bin/pip install -e .
 ```
 
@@ -249,6 +250,12 @@ A drawing carries no FMR number; the office issues those. One is proposed from
 the drawing number so a reviewer has something to accept or change, and it is
 flagged so it never looks like a number somebody chose. If a draft is already
 waiting under that number, the sheet still arrives for review but without it.
+
+The review screen also says what the package would have cost to type by hand —
+"about 2.5 hours of typing" for a 51-drawing package. The model behind that is
+`domain/timeSaved.js`, ported from measurements taken against a real operator,
+and it is deliberately a floor: finding the email, downloading the package and
+checking the result afterwards are all excluded.
 
 Drawings keep a similar shape between projects but never quite the same one, so
 the engine is fixed and the variation lives in a **profile** — a JSON file per

@@ -41,7 +41,9 @@ packages/
   web/public/           5,453 lines   seven screens
   migrate/src/            390 lines   loading the old spreadsheet
   extract/                703 lines   Python: material out of drawing PDFs
-  import/src/runner.js                   spawns ../Archive to read a package
+  extract-iso/            ~2,600 lines  Python: the drawing reader itself
+  import/src/runner.js                   spawns it, and is the only place that
+                                         starts a process or writes to disk
 db/migrations/               6 files   schema
 scripts/check-ui.js                    enforces the web layer's rules
 ```

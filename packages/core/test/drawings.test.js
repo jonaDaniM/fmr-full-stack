@@ -191,5 +191,31 @@ test('the package is described in the terms a person cares about', () => {
   const { summary } = toDraftSheets(payload([
     row(), row({ pointNumber: '2', quantity: '', reviewReasons: ['missing_quantity'] })
   ]));
-  assert.equal(describePackage(summary), '1 drawing, 2 material lines, 1 line to check');
+  assert.equal(describePackage(summary),
+    '1 drawing, 2 material lines, 1 line to check — about a minute of typing');
+});
+
+test('the hours it replaced are reported, and read as a person would say them', () => {
+  // The case for this system is made in hours, so the hours are part of what
+  // the import screen says. Never "about 1 minutes".
+  const one = toDraftSheets(payload([row()])).summary.timeSaved;
+  assert.equal(one.available, true);
+  assert.match(describePackage(toDraftSheets(payload([row()])).summary), /about a minute/);
+
+  // Jonathan's real package: 51 drawings, 329 rows.
+  const big = toDraftSheets({
+    drawings: Array.from({ length: 51 }, (_, i) => ({
+      drawingNumber: `LP131-AI(100)-8520${String(i).padStart(2, '0')}`,
+      materials: Array.from({ length: 6 }, () => row())
+    })),
+    quarantine: []
+  }).summary;
+  assert.equal(big.timeSaved.drawings, 51);
+  assert.ok(big.timeSaved.seconds > 5000, 'hours, not minutes');
+});
+
+test('nothing read is not the same as nothing saved', () => {
+  const { summary } = toDraftSheets({ drawings: [], quarantine: [] });
+  assert.equal(summary.timeSaved.available, false);
+  assert.equal(summary.timeSaved.seconds, null, 'not zero — unknown');
 });
