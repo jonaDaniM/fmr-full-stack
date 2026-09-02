@@ -17,6 +17,10 @@ SERVICE="${GCP_SERVICE:-fmr}"
 DB_INSTANCE="${GCP_DB_INSTANCE:-fmr-db}"
 DB_NAME="${GCP_DB_NAME:-fmr}"
 DB_TIER="${GCP_DB_TIER:-db-f1-micro}"
+# Postgres 17 defaults to the Enterprise Plus edition, which refuses the
+# shared-core tiers and starts around $300/month. Saying Enterprise keeps
+# db-f1-micro available, which is what this system actually needs.
+DB_EDITION="${GCP_DB_EDITION:-ENTERPRISE}"
 
 say()  { printf '\n\033[1m%s\033[0m\n' "$*"; }
 fail() { printf '\n\033[31m%s\033[0m\n' "$*" >&2; exit 1; }
@@ -62,6 +66,7 @@ if [[ "${1:-}" == "setup" ]]; then
     say "Creating the database instance — this takes several minutes"
     gcloud sql instances create "$DB_INSTANCE" \
       --database-version=POSTGRES_17 --tier="$DB_TIER" --region="$REGION" \
+      --edition="$DB_EDITION" \
       --storage-auto-increase --backup
   fi
 
@@ -118,6 +123,15 @@ DATABASE_URL="postgresql://fmr:${DB_PASSWORD}@localhost/${DB_NAME}?host=/cloudsq
 
 say "Building the image"
 IMAGE="${REGION}-docker.pkg.dev/${PROJECT}/cloud-run-source-deploy/${SERVICE}"
+
+# Cloud Run creates this repository itself when it builds from source. We hand
+# it a built image instead, so on a new project there is nothing to push to.
+gcloud artifacts repositories describe cloud-run-source-deploy \
+  --location="$REGION" >/dev/null 2>&1 \
+  || gcloud artifacts repositories create cloud-run-source-deploy \
+       --repository-format=docker --location="$REGION" \
+       --description="Images for Cloud Run" >/dev/null
+
 gcloud builds submit --tag "$IMAGE" .
 
 # Migrations run as their own job, before the new code is serving. A migration
