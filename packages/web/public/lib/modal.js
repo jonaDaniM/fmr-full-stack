@@ -45,6 +45,10 @@ document.addEventListener('pointerdown', (event) => {
  * message appears inside the dialog and the dialog stays open with the input
  * intact.
  *
+ * `readOnly` is for a dialog that only shows something — an FMR's lines, a
+ * line's history. There is nothing to submit, so it gets one button that
+ * closes rather than a Cancel/Confirm pair that would do the same thing twice.
+ *
  * Returns a promise resolving to the submitted values, or null if dismissed.
  */
 export function dialog({
@@ -57,6 +61,7 @@ export function dialog({
   cancelLabel = 'Cancel',
   danger = false,
   wide = false,
+  readOnly = false,
   onSubmit
 }) {
   // Only one at a time; a second would fight the first for focus.
@@ -84,7 +89,8 @@ export function dialog({
       ${body}
       ${fields.map(fieldMarkup).join('')}
       <div class="sheet-acts">
-        <button type="button" class="btn btn-quiet" data-dlg="cancel">${esc(cancelLabel)}</button>
+        ${readOnly ? '' : `<button type="button" class="btn btn-quiet"
+                data-dlg="cancel">${esc(cancelLabel)}</button>`}
         <button type="button" class="btn ${danger ? 'btn-danger' : 'btn-primary'}"
                 data-dlg="ok">${esc(confirmLabel)}</button>
       </div>
@@ -181,7 +187,7 @@ export function dialog({
 
     errorBox.hidden = true;
     okButton.disabled = true;
-    cancelButton.disabled = true;
+    if (cancelButton) cancelButton.disabled = true;
     okButton.textContent = workingLabel;
 
     try {
@@ -191,13 +197,13 @@ export function dialog({
       // Stay open, keep what they typed, say what went wrong.
       showError(failure.message);
       okButton.disabled = false;
-      cancelButton.disabled = false;
+      if (cancelButton) cancelButton.disabled = false;
       okButton.textContent = confirmLabel;
     }
   }
 
-  okButton.onclick = submit;
-  cancelButton.onclick = () => dismiss();
+  okButton.onclick = readOnly ? () => dismiss() : submit;
+  if (cancelButton) cancelButton.onclick = () => dismiss();
   backdrop.onclick = (event) => { if (event.target === backdrop) dismiss(); };
 
   // A control inside `body` may close the dialog and hand back its own answer —
@@ -219,9 +225,10 @@ export function dialog({
 
   open = { dismiss };
 
-  // Focus the first thing worth typing into, or the safe button.
+  // Focus the first thing worth typing into, or the safe button — which on a
+  // read-only dialog is the only button there is.
   const firstInput = sheet.querySelector('input, select, textarea');
-  (firstInput ?? cancelButton).focus();
+  (firstInput ?? cancelButton ?? okButton).focus();
 
   return result;
 }

@@ -264,8 +264,7 @@ async function openFmr(fmrId) {
         <tbody>${rows}</tbody>
       </table></div>`,
     confirmLabel: 'Close',
-    cancelLabel: 'Done',
-    onSubmit: () => null
+    readOnly: true
   });
 }
 
