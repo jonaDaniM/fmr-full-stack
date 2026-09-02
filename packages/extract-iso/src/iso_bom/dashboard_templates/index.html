@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Turner Takeoff Analytics</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='dashboard.css') }}">
+</head>
+<body>
+  <a class="skip-link" href="#main-content">Skip to dashboard</a>
+  <header class="topbar">
+    <div class="brand-lockup">
+      <span class="brand">TURNER INDUSTRIES</span>
+      <span class="product">Takeoff Analytics</span>
+    </div>
+    <div class="local-badge"><span aria-hidden="true"></span> Local only</div>
+  </header>
+
+  <main id="main-content" class="shell">
+    <section class="intro" aria-labelledby="page-title">
+      <div>
+        <p class="eyebrow">OPERATIONS OVERVIEW</p>
+        <h1 id="page-title">Package intelligence, in one place.</h1>
+        <p class="lede">Track pipe footage, field material requests, material takeoffs, and bolt and gasket takeoffs across every indexed IWP.</p>
+      </div>
+      <button id="refresh-button" class="primary-button" type="button">Refresh outputs</button>
+    </section>
+
+    <section class="filters" aria-label="Dashboard filters">
+      <label class="search-field">
+        <span>Search package, CWA, or ISO</span>
+        <input id="search" type="search" placeholder="IP-SMM…, 10D, or LP131…" autocomplete="off">
+      </label>
+      <label><span>Workflow</span><select id="workflow"><option value="">All workflows</option></select></label>
+      <label><span>Status</span><select id="status"><option value="">All statuses</option></select></label>
+      <label><span>CWA</span><select id="cwa"><option value="">All CWAs</option></select></label>
+      <label><span>MTO scope</span><select id="mto-scope"><option value="">All MTO scopes</option></select></label>
+      <div class="date-filter-group" role="group" aria-labelledby="date-filter-label">
+        <span id="date-filter-label" class="filter-label">Date range</span>
+        <label><span>From</span><input id="date-from" type="date"></label>
+        <label><span>To</span><input id="date-to" type="date"></label>
+        <button id="clear-filters" class="quiet-button" type="button">Clear filters</button>
+      </div>
+    </section>
+
+    <section class="kpi-grid" aria-label="Key metrics">
+      <article class="kpi"><span>Packages</span><strong id="kpi-packages">—</strong><small>Unique IWP numbers</small></article>
+      <article class="kpi"><span>Runs</span><strong id="kpi-runs">—</strong><small>Complete history</small></article>
+      <article class="kpi"><span>ISO drawings</span><strong id="kpi-isos">—</strong><small>Current selected drawings</small></article>
+      <article class="kpi emphasis impact"><span>Estimated time saved</span><strong id="kpi-time-saved">—</strong><small>Current measured workflows</small></article>
+      <article class="kpi"><span>Processing time</span><strong id="kpi-processing">—</strong><small>Recorded current runs</small></article>
+      <article class="kpi emphasis"><span>Pipe footage</span><strong id="kpi-pipe">—</strong><small>Current package totals</small></article>
+      <article class="kpi"><span>FMR sheets</span><strong id="kpi-fmr">—</strong><small>Current generated forms</small></article>
+      <article class="kpi"><span>Material records</span><strong id="kpi-materials">—</strong><small>Accepted bolts and gaskets</small></article>
+      <article class="kpi"><span>CWAs</span><strong id="kpi-cwas">—</strong><small>Indexed work areas</small></article>
+      <article class="kpi emphasis"><span>MTO rows</span><strong id="kpi-mto-rows">—</strong><small>Current scope outputs</small></article>
+      <article class="kpi warning"><span>Partial MTO rows</span><strong id="kpi-partial-rows">—</strong><small>Cells requiring review</small></article>
+      <article class="kpi warning"><span>Review items</span><strong id="kpi-reviews">—</strong><small>Current outstanding issues</small></article>
+    </section>
+
+    <section class="chart-grid">
+      <article class="panel">
+        <div class="panel-heading"><div><p class="eyebrow">PIPE FOOTAGE</p><h2>Current totals by package</h2></div></div>
+        <div id="pipe-chart" class="bar-chart" role="img" aria-label="Pipe footage by package"></div>
+      </article>
+      <article class="panel">
+        <div class="panel-heading"><div><p class="eyebrow">RUN ACTIVITY</p><h2>Processing history</h2></div></div>
+        <div id="trend-chart" class="trend-chart" role="img" aria-label="Processing runs over time"></div>
+        <div id="status-legend" class="status-legend"></div>
+      </article>
+      <article class="panel">
+        <div class="panel-heading"><div><p class="eyebrow">EFFICIENCY</p><h2>Time saved by package</h2></div></div>
+        <div id="time-chart" class="bar-chart" role="img" aria-label="Estimated manual time saved by package"></div>
+      </article>
+    </section>
+
+    <details class="methodology panel">
+      <summary>How the estimated time-saved metric is calculated</summary>
+      <div class="methodology-body">
+        <p><strong>FMR:</strong> 17.30 seconds per package, 33.36 seconds per selected ISO, 20 seconds per normal material row, and 26 seconds when a description exceeds 52 characters.</p>
+        <p><strong>Pipe footage:</strong> 34.66 seconds per package plus 8 seconds per selected ISO—6 seconds to copy and paste the ISO number and 2 seconds to type its total footage.</p>
+        <p>The model is based on measurements from a technically proficient operator. Email/PDF access, downloading, command preparation, machine wait time, final review, and corrections are excluded. Only the newest successful result per package and workflow contributes to the headline.</p>
+      </div>
+    </details>
+
+    <section class="panel package-panel" aria-labelledby="packages-title">
+      <div class="panel-heading">
+        <div><p class="eyebrow">PACKAGE REGISTER</p><h2 id="packages-title">Indexed packages</h2></div>
+        <span id="result-count" class="result-count">—</span>
+      </div>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th>Package</th><th>CWA</th><th>Status</th><th>Workflows</th><th>MTO scopes</th><th>ISOs</th><th>Time saved</th><th>Pipe LF</th><th>FMRs</th><th>Issues</th><th>Last run</th></tr></thead>
+          <tbody id="package-rows"></tbody>
+        </table>
+      </div>
+      <div id="empty-state" class="empty-state" hidden>No packages match the current filters.</div>
+    </section>
+
+    <section class="panel package-panel mto-panel" aria-labelledby="mto-title">
+      <div class="panel-heading">
+        <div><p class="eyebrow">MTO REGISTER</p><h2 id="mto-title">Generated material takeoffs</h2></div>
+        <span id="mto-result-count" class="result-count">—</span>
+      </div>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th>CWA</th><th>IWP</th><th>Scope</th><th>ISOs</th><th>Rows</th><th>Partial</th><th>Generated</th><th>Status</th><th>Workbook</th></tr></thead>
+          <tbody id="mto-rows"></tbody>
+        </table>
+      </div>
+      <div id="mto-empty-state" class="empty-state" hidden>No MTO runs match the current filters.</div>
+    </section>
+
+    <p id="data-note" class="data-note">Indexed from: {{ roots|join(', ') }}</p>
+  </main>
+
+  <div id="detail-backdrop" class="detail-backdrop" hidden></div>
+  <aside id="detail-panel" class="detail-panel" aria-labelledby="detail-title" aria-hidden="true">
+    <div class="detail-header">
+      <div><p class="eyebrow">PACKAGE DETAIL</p><h2 id="detail-title">Package</h2></div>
+      <button id="detail-close" class="icon-button" type="button" aria-label="Close package detail">×</button>
+    </div>
+    <div id="detail-content" class="detail-content"></div>
+  </aside>
+
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+  <script src="{{ url_for('static', filename='dashboard.js') }}" defer></script>
+</body>
+</html>

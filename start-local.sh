@@ -18,7 +18,7 @@ export PORT="${PORT:-3000}"
 
 # The drawing reader is Python and lives beside this checkout. If its venv is
 # not there the app still runs; only the drawing upload refuses, and says so.
-EXTRACT_HOME="${FMR_EXTRACT_HOME:-$(cd .. && pwd)/Archive}"
+EXTRACT_HOME="${FMR_EXTRACT_HOME:-$(pwd)/packages/extract-iso}"
 export FMR_EXTRACT_HOME="$EXTRACT_HOME"
 if [[ -x "$EXTRACT_HOME/.venv/bin/python" ]]; then
   export FMR_PYTHON="${FMR_PYTHON:-$EXTRACT_HOME/.venv/bin/python}"

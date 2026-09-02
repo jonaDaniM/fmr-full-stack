@@ -29,7 +29,7 @@ const here = dirname(fileURLToPath(import.meta.url));
  */
 const python = () => process.env.FMR_PYTHON || 'python3';
 const extractorHome = () =>
-  process.env.FMR_EXTRACT_HOME || join(here, '../../../../Archive');
+  process.env.FMR_EXTRACT_HOME || join(here, '../../extract-iso');
 const timeoutMs = () => Number(process.env.FMR_EXTRACT_TIMEOUT_MS) || 300_000;
 
 /**

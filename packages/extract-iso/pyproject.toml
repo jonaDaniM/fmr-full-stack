@@ -1,0 +1,46 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "iso-bom-extractor"
+version = "0.7.0"
+description = "Local-first piping-isometric BOM extraction, pipe-footage reporting, FMR generation, and MTO generation"
+requires-python = ">=3.9"
+# Flask (the analytics dashboard) and python-docx (the pipe-footage report)
+# belong to workflows the FMR system does not call, so they are optional —
+# `pip install .[workflows]` brings them back. Pillow is not optional: openpyxl
+# silently drops a workbook's images without it, and the FMR template carries
+# seven of them.
+dependencies = [
+  "PyMuPDF>=1.24,<2",
+  "openpyxl>=3.1.5,<3.2",
+  "Pillow>=11,<12",
+]
+
+[project.optional-dependencies]
+# The tests under tests/ need this and nothing declared it, so a fresh
+# checkout could install the package and still not run its own suite.
+dev = ["pytest>=8,<9"]
+
+# The workflows the FMR system does not use: the analytics dashboard, the
+# pipe-footage Word report, and image handling for the MTO workbook.
+workflows = ["Flask>=3.0,<4", "python-docx>=1.2,<2"]
+
+[project.scripts]
+iso-bom-extract = "iso_bom.cli:main"
+iso-fmr-create = "iso_bom.fmr_cli:main"
+iso-pipe-footage = "iso_bom.pipe_cli:main"
+iso-mto-create = "iso_bom.mto_cli:main"
+iso-analytics-dashboard = "iso_bom.analytics_cli:main"
+iso-fmr-json = "iso_bom.fmr_json:main"
+
+[tool.setuptools.package-data]
+iso_bom = ["dashboard_templates/*.html", "dashboard_static/*.css", "dashboard_static/*.js"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
