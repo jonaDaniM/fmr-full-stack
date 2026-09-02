@@ -19,7 +19,7 @@ import {
 } from '../../core/src/services/backorderReview.js';
 import { searchLines, getFmrDetail } from '../../core/src/services/search.js';
 import {
-  getRegister, getIsoSummary, getLineHistory, getDashboard
+  getRegister, getIsoSummary, getLineHistory, getDashboard, getActiveBagQueue
 } from '../../core/src/services/reporting.js';
 import {
   stageWorkbook, getBatch, correctLine, publishBatch
@@ -286,9 +286,11 @@ route('GET', /^\/api\/backorders$/, async (req, res, { url }) => {
   const client = await pool.connect();
   try {
     const queue = await getBackorderQueue(client, ctx.projectId, {
-      status: url.searchParams.get('status') || undefined
+      status: url.searchParams.get('status') || undefined,
+      page: Number(url.searchParams.get('page')) || 1,
+      pageSize: Number(url.searchParams.get('pageSize')) || undefined
     });
-    json(res, 200, { requests: queue });
+    json(res, 200, queue);
   } finally {
     client.release();
   }
@@ -326,7 +328,14 @@ route('GET', /^\/api\/register$/, async (req, res, { url }) => {
   requirePermission(ctx, 'search');
   await withClient(ctx, (c) => getRegister(c, ctx.projectId, {
     status: url.searchParams.get('status') || undefined,
-    priority: url.searchParams.get('priority') || undefined
+    priority: url.searchParams.get('priority') || undefined,
+    query: url.searchParams.get('q') || undefined,
+    queryType: url.searchParams.get('type') || undefined,
+    exception: url.searchParams.get('exception') || undefined,
+    sort: url.searchParams.get('sort') || undefined,
+    direction: url.searchParams.get('direction') || undefined,
+    page: Number(url.searchParams.get('page')) || 1,
+    pageSize: Number(url.searchParams.get('pageSize')) || undefined
   }), res);
 });
 
@@ -340,6 +349,25 @@ route('GET', /^\/api\/dashboard$/, async (req, res) => {
   const ctx = await authenticate(req);
   requirePermission(ctx, 'search');
   await withClient(ctx, (c) => getDashboard(c, ctx.projectId), res);
+});
+
+/**
+ * Bags still holding material.
+ *
+ * Beside the backorder queue on the Office screen: a backorder is material the
+ * office owes the field, an unissued bag is material the field is owed and
+ * cannot see. Same permission as the backorder queue — it is the same job.
+ */
+route('GET', /^\/api\/active-bags$/, async (req, res, { url }) => {
+  const ctx = await authenticate(req);
+  requirePermission(ctx, 'adminBackorder');
+  await withClient(ctx, (c) => getActiveBagQueue(c, ctx.projectId, {
+    query: url.searchParams.get('q') || undefined,
+    readiness: url.searchParams.get('readiness') || undefined,
+    sortOrder: url.searchParams.get('sort') || undefined,
+    page: Number(url.searchParams.get('page')) || 1,
+    pageSize: Number(url.searchParams.get('pageSize')) || 25
+  }), res);
 });
 
 route('GET', /^\/api\/lines\/([0-9a-f-]{36})\/history$/, async (req, res, { match }) => {

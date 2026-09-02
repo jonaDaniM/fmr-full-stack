@@ -12,8 +12,35 @@ import { planAdminDecision, BACKORDER_STATUS } from '../domain/backorder.js';
 import { serializeLine, HEADER_ROLLUP_SQL } from './field.js';
 import { raiseNotice, noticesForLines } from './notices.js';
 
-/** The queue the office works from, newest requests last. */
-export async function getBackorderQueue(client, projectId, { status } = {}) {
+const QUEUE_PAGE = Object.freeze({ default: 25, min: 5, max: 200 });
+
+/**
+ * The queue the office works from, newest requests last.
+ *
+ * Paged. This returned every open request in one answer, which on the real
+ * project was 412 rows and 300KB — a table nobody scrolls to the end of, sent
+ * over site wifi to a phone. The page is decided in SQL for the same reason
+ * the register's is: the count is a number the office needs regardless, and
+ * the rows they can actually read are 25 of it.
+ */
+export async function getBackorderQueue(client, projectId, {
+  status, page = 1, pageSize = QUEUE_PAGE.default
+} = {}) {
+  const size = Math.max(QUEUE_PAGE.min,
+    Math.min(QUEUE_PAGE.max, Math.floor(Number(pageSize) || QUEUE_PAGE.default)));
+
+  const { rows: [{ total }] } = await client.query(
+    `SELECT count(*)::int AS total
+       FROM backorder_requests b
+      WHERE b.project_id = $1 AND b.active
+        AND ($2::text IS NULL OR b.status = $2)`,
+    [projectId, status ?? null]
+  );
+
+  const totalPages = Math.max(1, Math.ceil(total / size));
+  const current = Math.max(1, Math.min(Math.floor(Number(page) || 1), totalPages));
+  const offset = (current - 1) * size;
+
   const { rows } = await client.query(
     `SELECT b.*,
             l.iso_number, l.iso_sheet, l.commodity_code, l.size,
@@ -25,11 +52,24 @@ export async function getBackorderQueue(client, projectId, { status } = {}) {
       WHERE b.project_id = $1
         AND b.active
         AND ($2::text IS NULL OR b.status = $2)
-      ORDER BY h.fmr_number, l.line_number, b.reported_at`,
-    [projectId, status ?? null]
+      ORDER BY h.fmr_number, l.line_number, b.reported_at
+      LIMIT $3 OFFSET $4`,
+    [projectId, status ?? null, size, offset]
   );
 
-  return rows.map(serializeBackorder);
+  return {
+    requests: rows.map(serializeBackorder),
+    pagination: {
+      page: current,
+      pageSize: size,
+      totalRecords: total,
+      totalPages,
+      hasPrevious: current > 1,
+      hasNext: current < totalPages,
+      firstRecord: total ? offset + 1 : 0,
+      lastRecord: Math.min(offset + size, total)
+    }
+  };
 }
 
 /**

@@ -12,7 +12,21 @@ import { dialog, confirmAction } from './lib/modal.js';
 import { toast, toastError } from './lib/toast.js';
 import { initShell } from './lib/shell.js';
 
-const state = { tab: 'today', filter: 'Pending', data: null, filters: null };
+const REGISTER_DEFAULTS = Object.freeze({
+  query: '', queryType: 'AUTO', status: '', priority: '',
+  exception: 'ALL', sort: 'LAST_ACTIVITY', direction: 'DESC',
+  page: 1, pageSize: 25
+});
+
+const state = {
+  tab: 'today', filter: 'Pending', data: null, filters: null,
+  bagReadiness: 'ALL', bagQuery: '',
+  // Each paged tab keeps its own place, so moving between them does not put
+  // somebody back at page 1 of the queue they were working through.
+  queuePage: 1, queuePages: null,
+  bagPage: 1, bagPages: null,
+  register: { ...REGISTER_DEFAULTS }, registerPages: null
+};
 
 // --- backorder queue -------------------------------------------------------
 
@@ -31,9 +45,12 @@ const orderFilters = (statuses) =>
   });
 
 async function renderQueue() {
-  const status = state.filter === 'All' ? '' : `?status=${encodeURIComponent(state.filter)}`;
-  const { requests } = await api(`/api/backorders${status}`);
+  const params = new URLSearchParams({ page: String(state.queuePage ?? 1) });
+  if (state.filter !== 'All') params.set('status', state.filter);
+
+  const { requests, pagination } = await api(`/api/backorders?${params}`);
   state.data = requests;
+  state.queuePages = pagination;
 
   // Group by FMR: an expeditor chases a whole requisition, not one line.
   const groups = {};
@@ -48,12 +65,37 @@ async function renderQueue() {
 
   const filters = [...(state.filters ?? FALLBACK_FILTERS), 'All'];
 
+  // The request count is the whole queue; the quantities are this page's, and
+  // say so. A tile that read "25 requests" when 166 are waiting would be
+  // worse than no tile.
+  const paged = pagination.totalRecords > requests.length;
+  const perPage = paged ? `<span class="s">on this page</span>` : '';
+
+  // A quantity of zero because nothing has been committed yet is not worth a
+  // tile — on the Pending filter it is zero by definition. Showing each only
+  // where it carries something keeps the row honest.
+  const showPending = totals.pending > 0 || !paged;
+  const showConfirmed = totals.confirmed > 0 || !paged;
+  const fmrCount = Object.keys(groups).length;
+
   $('view').innerHTML = `
     <div class="stats">
-      <div class="stat"><span class="n">${requests.length}</span><span class="l">Requests</span></div>
-      <div class="stat stat-warn"><span class="n">${n(totals.pending)}</span><span class="l">Qty pending</span></div>
-      <div class="stat"><span class="n">${n(totals.confirmed)}</span><span class="l">Qty committed</span></div>
-      <div class="stat"><span class="n">${Object.keys(groups).length}</span><span class="l">FMRs affected</span></div>
+      <div class="stat${totals.pending > 0 ? ' stat-warn' : ''}">
+        <span class="n">${n(pagination.totalRecords)}</span>
+        <span class="l">Request${pagination.totalRecords === 1 ? '' : 's'}</span>
+        <span class="s">${esc(state.filter === 'All' ? 'all states' : state.filter.toLowerCase())}</span>
+      </div>
+      ${showPending ? `<div class="stat">
+        <span class="n">${n(totals.pending)}</span>
+        <span class="l">Qty pending</span>
+        ${totals.pending > 0 ? perPage : ''}</div>` : ''}
+      ${showConfirmed ? `<div class="stat">
+        <span class="n">${n(totals.confirmed)}</span>
+        <span class="l">Qty committed</span>
+        ${totals.confirmed > 0 ? perPage : ''}</div>` : ''}
+      <div class="stat"><span class="n">${n(fmrCount)}</span>
+        <span class="l">FMR${fmrCount === 1 ? '' : 's'}</span>
+        ${paged ? '<span class="s">on this page</span>' : ''}</div>
     </div>
 
     <div class="filters" role="group" aria-label="Filter by status">
@@ -67,7 +109,7 @@ async function renderQueue() {
       <section class="group">
         <h3><span class="num">${esc(fmr)}</span>
             <span class="sub">${rows.length} line${rows.length === 1 ? '' : 's'}
-            &middot; needed ${day(rows[0].dateRequired)}
+            ${rows[0].dateRequired ? `&middot; needed ${day(rows[0].dateRequired)}` : ''}
             ${rows[0].priority ? `&middot; ${esc(rows[0].priority)} priority` : ''}</span></h3>
         <div class="tw"><table>
           <thead><tr>
@@ -79,6 +121,8 @@ async function renderQueue() {
         </table></div>
       </section>
     `).join('') || emptyQueue()}
+
+    ${renderPager(pagination)}
   `;
 }
 
@@ -90,8 +134,38 @@ const emptyQueue = () => `
       : 'Try another filter to see requests in a different state.'}</p>
   </div>`;
 
+/**
+ * What a crew's note adds to the reason they already picked.
+ *
+ * They typically type the reason back and then append the detail — "Not found
+ * in laydown yard" chosen from the list, "Not found in laydown yard 1 and 2"
+ * typed underneath. Printing both put the same sentence twice on every row of
+ * a 166-row queue and hid the only part that mattered: which yards.
+ *
+ * Returns the remainder, or '' when the note says nothing new.
+ */
+function extraNote(request) {
+  const notes = String(request.fieldNotes ?? '').trim();
+  if (!notes) return '';
+
+  const reason = String(request.reason ?? '').trim();
+  if (!reason) return notes;
+
+  const tidy = (value) => value.toLowerCase().replace(/[\s.,;:-]+$/, '');
+  if (tidy(notes) === tidy(reason)) return '';
+
+  // Only when the note actually opens with the reason. A note that merely
+  // mentions it partway through is a sentence of its own and stays whole.
+  if (notes.toLowerCase().startsWith(reason.toLowerCase())) {
+    const rest = notes.slice(reason.length).replace(/^[\s.,;:-]+/, '').trim();
+    return rest || '';
+  }
+  return notes;
+}
+
 function renderQueueRow(r) {
   const decidable = r.qtyPending > 0;
+  const note = extraNote(r);
   return `<tr data-request="${esc(r.id)}">
     <td class="num">${esc(r.lineNumber)}</td>
     <td class="mono">${esc(r.isoNumber)}<span class="dim"> sht ${esc(r.isoSheet)}</span></td>
@@ -99,7 +173,7 @@ function renderQueueRow(r) {
     <td class="num">${n(r.qtyRequested)}</td>
     <td class="num">${n(r.qtyPending)}</td>
     <td class="num">${n(r.qtyConfirmed)}</td>
-    <td>${esc(r.reason)}${r.fieldNotes ? `<div class="dim">${esc(r.fieldNotes)}</div>` : ''}</td>
+    <td>${esc(r.reason)}${note ? `<div class="dim">${esc(note)}</div>` : ''}</td>
     <td class="dim">${esc(r.reportedByName ?? '')}<br>${day(r.reportedAt)}</td>
     <td><div class="rowacts">
       ${decidable ? `
@@ -182,18 +256,172 @@ async function decide(request, decision) {
   });
 }
 
-// --- register --------------------------------------------------------------
+// --- active bags -----------------------------------------------------------
 
-async function renderRegister() {
-  const { fmrs, totals } = await api('/api/register');
+/**
+ * Bags with material still in them.
+ *
+ * The mirror of the backorder queue. A backorder is material the office owes
+ * the field; an unissued bag is material the field is owed and cannot see —
+ * packed, labelled, and sitting on a rack while somebody waits for it. FMRv3
+ * ran these as two tabs of one workspace for that reason, and the dashboard
+ * count alone never told anyone which bag to go and look for.
+ *
+ * Oldest first: age is the signal. A bag packed this morning is work in
+ * progress; one packed three weeks ago is a problem.
+ */
+const BAG_FILTERS = [
+  ['ALL', 'All'],
+  ['READY_FOR_FIELD', 'Ready for field'],
+  ['PARTIALLY_ISSUED', 'Partially issued']
+];
+
+async function renderBags() {
+  // 100 rows arrived at once with no way to reach the 101st. The tiles above
+  // still count every bag — those come from the summary, not the page.
+  const params = new URLSearchParams({
+    readiness: state.bagReadiness, page: String(state.bagPage ?? 1)
+  });
+  if (state.bagQuery) params.set('q', state.bagQuery);
+
+  const { summary, records, pagination } = await api(`/api/active-bags?${params}`);
+  state.bagPages = pagination;
 
   $('view').innerHTML = `
     <div class="stats">
-      <div class="stat"><span class="n">${fmrs.length}</span><span class="l">FMRs</span></div>
+      <div class="stat"><span class="n">${n(summary.activeTags)}</span><span class="l">Bag tags</span></div>
+      <div class="stat"><span class="n">${n(summary.quantity)}</span><span class="l">Units bagged</span></div>
+      <div class="stat stat-ok"><span class="n">${n(summary.readyForField)}</span><span class="l">Ready for field</span></div>
+      <div class="stat ${summary.stale ? 'stat-warn' : ''}"><span class="n">${n(summary.stale)}</span><span class="l">Over ${n(summary.staleAfterDays)} days</span></div>
+    </div>
+    <div class="filters">
+      ${BAG_FILTERS.map(([value, label]) => `
+        <button type="button" data-bag-filter="${esc(value)}"
+                aria-pressed="${value === state.bagReadiness}">${esc(label)}</button>`).join('')}
+      <input type="search" id="bagSearch" class="bag-search"
+        placeholder="Tag, FMR, drawing or material" value="${esc(state.bagQuery)}">
+    </div>
+    <div class="tw"><table>
+      <thead><tr>
+        <th class="w-md">Tag</th><th class="w-md">FMR</th><th class="w-md">Drawing</th>
+        <th class="w-grow">Material</th><th class="w-md">Where</th>
+        <th class="num w-sm">In bag</th><th class="w-md">Bagged</th><th class="w-md">State</th>
+      </tr></thead>
+      <tbody>${records.map(renderBagRow).join('')
+        || emptyRow(8, state.bagQuery || state.bagReadiness !== 'ALL'
+          ? 'No bags match that.'
+          : 'Nothing is sitting in a bag. Everything packed has been issued.')}
+      </tbody>
+    </table></div>
+
+    ${renderPager(pagination)}`;
+}
+
+const renderBagRow = (b) => `
+  <tr data-fmr="${esc(b.fmrId)}" data-number="${esc(b.fmrNumber)}">
+    <td class="mono"><strong>${esc(b.tagNumber)}</strong></td>
+    <td class="mono">${esc(b.fmrNumber)}<span class="dim"> ln ${esc(b.lineNumber)}</span></td>
+    <td class="mono dim">${esc(b.isoKey ?? '')}</td>
+    <td>${esc(b.description ?? '')}
+        <div class="dim">${esc(b.commodityCode ?? '')} &middot; ${esc(b.size ?? '')}</div></td>
+    <td>${esc(b.storageLocation ?? '—')}</td>
+    <td class="num">${n(b.qtyRemaining)} ${esc(b.uom ?? '')}${
+      b.qtyIssued > 0 ? `<div class="dim">${n(b.qtyIssued)} drawn</div>` : ''}</td>
+    <td class="dim">${day(b.baggedAt)}${
+      b.baggedBy ? `<div>${esc(b.baggedBy)}</div>` : ''}</td>
+    <td>${esc(b.readinessLabel)}${
+      b.stale ? '<div class="dim">sitting a while</div>' : ''}</td>
+  </tr>`;
+
+// --- register --------------------------------------------------------------
+
+/**
+ * How the register can be narrowed.
+ *
+ * A register grows without limit — the real system has hundreds of FMRs — so
+ * these are how somebody finds the one they are being asked about, not
+ * decoration. Ported from FMRv3's register, which had all of this and was the
+ * screen the office lived in.
+ */
+const QUERY_TYPES = [
+  ['AUTO', 'Anything'], ['FMR', 'FMR number'], ['ISO', 'Drawing'], ['IWP', 'Work package']
+];
+
+const EXCEPTIONS = [
+  ['ALL', 'Everything'],
+  ['HAS_REMAINING', 'Still outstanding'],
+  ['NOT_FULLY_LOCATED', 'Not all found'],
+  ['HAS_AVAILABLE', 'On the shelf'],
+  ['HAS_BAGGED', 'Bagged, not issued'],
+  ['PENDING_BACKORDER', 'Waiting on the office'],
+  ['CONFIRMED_BACKORDER', 'On order']
+];
+
+const SORTS = [
+  ['LAST_ACTIVITY', 'Last touched'], ['DATE_REQUIRED', 'Needed by'],
+  ['FMR_NUMBER', 'FMR number'], ['REMAINING', 'Remaining'],
+  ['FULFILLMENT', 'Progress'], ['REQUESTED', 'Requested']
+];
+
+const option = (value, label, chosen) =>
+  `<option value="${esc(value)}"${value === chosen ? ' selected' : ''}>${esc(label)}</option>`;
+
+async function renderRegister() {
+  const r = state.register;
+  const params = new URLSearchParams({
+    type: r.queryType, exception: r.exception,
+    sort: r.sort, direction: r.direction,
+    page: String(r.page), pageSize: String(r.pageSize)
+  });
+  if (r.query) params.set('q', r.query);
+  if (r.status) params.set('status', r.status);
+  if (r.priority) params.set('priority', r.priority);
+
+  const { fmrs, totals, filters, pagination } = await api(`/api/register?${params}`);
+  state.registerPages = pagination;
+
+  const narrowed = r.query || r.status || r.priority || r.exception !== 'ALL';
+
+  $('view').innerHTML = `
+    <div class="stats">
+      <div class="stat"><span class="n">${n(pagination.totalRecords)}</span><span class="l">${
+        narrowed ? 'Matching FMRs' : 'FMRs'}</span></div>
       <div class="stat"><span class="n">${n(totals.lines)}</span><span class="l">Lines</span></div>
       <div class="stat stat-ok"><span class="n">${n(totals.fulfillmentPct)}%</span><span class="l">Fulfilled</span></div>
       <div class="stat stat-warn"><span class="n">${n(totals.backordered)}</span><span class="l">On backorder</span></div>
     </div>
+
+    <div class="regfilters">
+      <label class="regsearch">
+        <span class="vh">Search the register</span>
+        <input type="search" id="regQuery" value="${esc(r.query)}"
+               placeholder="FMR, drawing, work package or who asked">
+      </label>
+      <label><span class="vh">Search in</span>
+        <select id="regType">${QUERY_TYPES.map(([v, l]) => option(v, l, r.queryType)).join('')}</select>
+      </label>
+      <label><span class="vh">Status</span>
+        <select id="regStatus">${
+          [option('', 'Any status', r.status)].concat(
+            (filters.statuses ?? []).map((v) => option(v, v, r.status))).join('')}</select>
+      </label>
+      <label><span class="vh">Priority</span>
+        <select id="regPriority">${
+          [option('', 'Any priority', r.priority)].concat(
+            (filters.priorities ?? []).map((v) => option(v, v, r.priority))).join('')}</select>
+      </label>
+      <label><span class="vh">Show only</span>
+        <select id="regException">${EXCEPTIONS.map(([v, l]) => option(v, l, r.exception)).join('')}</select>
+      </label>
+      <label><span class="vh">Sort by</span>
+        <select id="regSort">${SORTS.map(([v, l]) => option(v, l, r.sort)).join('')}</select>
+      </label>
+      <button type="button" id="regDirection" class="btn btn-sm"
+              title="${r.direction === 'DESC' ? 'Largest first' : 'Smallest first'}">
+        ${r.direction === 'DESC' ? '↓' : '↑'}</button>
+      ${narrowed ? '<button type="button" id="regReset" class="btn btn-sm">Clear</button>' : ''}
+    </div>
+
     <div class="tw"><table>
       <thead><tr>
         <th class="w-md">FMR</th><th class="w-md">IWP</th><th class="w-lg">Requested by</th>
@@ -202,9 +430,27 @@ async function renderRegister() {
         <th class="num w-sm">Remaining</th><th class="w-md">Progress</th><th class="w-md"></th>
       </tr></thead>
       <tbody>${fmrs.map(renderRegisterRow).join('')
-        || emptyRow(11, 'No FMRs on this project yet. Publish one from Drafts or Import.')}
+        || emptyRow(11, narrowed
+          ? 'Nothing matches that. Clear the filters to see the whole register.'
+          : 'No FMRs on this project yet. Publish one from Drafts or Import.')}
       </tbody>
-    </table></div>`;
+    </table></div>
+    ${renderPager(pagination)}`;
+}
+
+/** Where you are in the register, and how to move. */
+function renderPager(p) {
+  if (p.totalRecords === 0) return '';
+
+  return `
+    <div class="pager">
+      <span class="dim">${n(p.firstRecord)}–${n(p.lastRecord)} of ${n(p.totalRecords)}</span>
+      <button type="button" class="btn btn-sm" data-page="${esc(p.page - 1)}"
+        ${p.hasPrevious ? '' : 'disabled'}>Previous</button>
+      <span class="dim">Page ${n(p.page)} of ${n(p.totalPages)}</span>
+      <button type="button" class="btn btn-sm" data-page="${esc(p.page + 1)}"
+        ${p.hasNext ? '' : 'disabled'}>Next</button>
+    </div>`;
 }
 
 const renderRegisterRow = (f) => `
@@ -279,7 +525,8 @@ function renderFmrLineRows(lines) {
       <td class="num">${esc(l.lineNumber)}</td>
       <td class="mono">${esc(l.isoNumber)}<span class="dim"> sht ${esc(l.isoSheet)}</span></td>
       <td>${esc(l.description ?? '')}
-          <div class="dim">${esc(l.commodityCode ?? '')} &middot; ${esc(l.size ?? '')}</div></td>
+          <div class="dim">${esc(l.commodityCode ?? '')} &middot; ${esc(l.size ?? '')}</div>
+          ${renderFieldNotes(l.fieldNotes)}</td>
       <td class="num">${n(q.requested)}</td>
       <td class="num">${n(q.available)}</td>
       <td class="num">${n(q.bagged)}${bags ? `<div class="dim">${esc(bags)}</div>` : ''}</td>
@@ -288,6 +535,32 @@ function renderFmrLineRows(lines) {
       <td>${esc(l.status)}</td>
     </tr>`;
   }).join('');
+}
+
+/**
+ * What the crew wrote on this line.
+ *
+ * The quantities say what happened; these say why. "Rack 12 empty — checked 14
+ * as well" is the difference between an office deciding a backorder blind and
+ * deciding it knowing where somebody already looked. FMRv3 put these in the
+ * same drill-down and it is the reason the drill-down was worth opening.
+ */
+function renderFieldNotes(fieldNotes) {
+  const notes = fieldNotes?.notes ?? [];
+  if (!notes.length) return '';
+
+  const more = fieldNotes.truncated
+    ? `<li class="dim">…and ${n(fieldNotes.count - notes.length)} older</li>`
+    : '';
+
+  return `<ul class="notes">${notes.map((note) => `
+    <li>
+      <span class="note-what">${esc(note.actionLabel)} ${n(note.quantity)}${
+        note.uom ? ` ${esc(note.uom)}` : ''}</span>
+      <span class="note-text">${esc(note.notes)}</span>
+      <span class="dim">${esc(note.performedBy ?? '')}${
+        note.at ? ` · ${day(note.at)}` : ''}</span>
+    </li>`).join('')}${more}</ul>`;
 }
 
 /**
@@ -429,18 +702,28 @@ async function renderToday() {
         </table></div>`
       : `<div class="empty">
            <h2>Nothing moved today</h2>
-           <p>No material has been located, bagged or issued in the last 24 hours.</p>
+           <p>No material has been located, bagged or issued in the last 24 hours.
+              ${pending.count
+                ? `There ${pending.count === 1 ? 'is' : 'are'} still
+                   ${n(pending.count)} backorder${pending.count === 1 ? '' : 's'}
+                   waiting on a decision.`
+                : ''}</p>
+           ${pending.count
+             ? '<button type="button" class="btn btn-primary" data-tab-jump="queue">Open the queue</button>'
+             : ''}
          </div>`}`;
 }
 
 // --- wiring ----------------------------------------------------------------
 
 const VIEWS = {
-  today: renderToday, queue: renderQueue, register: renderRegister, iso: renderIso
+  today: renderToday, queue: renderQueue, bags: renderBags,
+  register: renderRegister, iso: renderIso
 };
 const SKELETONS = {
   today: { stats: 4, rows: 6 },
   queue: { stats: 4, rows: 8 },
+  bags: { stats: 4, rows: 8 },
   register: { stats: 4, rows: 10 },
   iso: { stats: 1, rows: 10 }
 };
@@ -472,10 +755,121 @@ $('tabs').onclick = (event) => {
   show();
 };
 
+/**
+ * The active-bag search.
+ *
+ * Delegated and bound once. Binding it inside the render meant every keystroke
+ * rebuilt the timer and re-rendered the input being typed into — the caret
+ * jumped, and a pending request from the previous render could land after the
+ * current one and show the wrong rows.
+ *
+ * The caret is put back after the re-render, because replacing the table
+ * replaces the box with it.
+ */
+$('view').addEventListener('input', debounce(async (event) => {
+  const box = event.target.closest('#bagSearch, #regQuery');
+  if (!box) return;
+
+  const id = box.id;
+  const query = box.value.trim();
+
+  if (id === 'bagSearch') {
+    if (query === state.bagQuery) return;
+    state.bagQuery = query;
+    state.bagPage = 1;
+  } else {
+    if (query === state.register.query) return;
+    // A new search starts at the first page; staying on page 4 of a result
+    // set that no longer has four pages shows nothing.
+    state.register = { ...state.register, query, page: 1 };
+  }
+
+  const caret = box.selectionStart;
+  await show();
+
+  const again = $(id);
+  if (again) {
+    again.focus();
+    again.setSelectionRange(caret, caret);
+  }
+}));
+
+/**
+ * The register's dropdowns.
+ *
+ * Delegated like everything else here, so the listeners survive the re-render
+ * that each change causes. Any change resets to page one, for the same reason
+ * a new search does.
+ */
+const REGISTER_CONTROLS = {
+  regType: 'queryType', regStatus: 'status', regPriority: 'priority',
+  regException: 'exception', regSort: 'sort'
+};
+
+$('view').addEventListener('change', (event) => {
+  const field = REGISTER_CONTROLS[event.target.id];
+  if (!field) return;
+
+  state.register = { ...state.register, [field]: event.target.value, page: 1 };
+  show();
+});
+
+/** Wait until the typing stops, so a search is one request and not eight. */
+function debounce(run, wait = 250) {
+  let timer;
+  return (...args) => {
+    clearTimeout(timer);
+    timer = setTimeout(() => run(...args), wait);
+  };
+}
+
 $('view').addEventListener('click', (event) => {
+  // An empty screen that names the work should be able to go to it.
+  const jump = event.target.closest('button[data-tab-jump]');
+  if (jump) {
+    const target = jump.dataset.tabJump;
+    state.tab = target;
+    for (const tab of $('tabs').querySelectorAll('button')) {
+      tab.setAttribute('aria-selected', String(tab.dataset.tab === target));
+    }
+    return show();
+  }
+
   const filter = event.target.closest('button[data-filter]');
   if (filter) {
     state.filter = filter.dataset.filter;
+    state.queuePage = 1;      // page 7 of the old filter is not page 7 of this one
+    return show();
+  }
+
+  const bagFilter = event.target.closest('button[data-bag-filter]');
+  if (bagFilter) {
+    state.bagReadiness = bagFilter.dataset.bagFilter;
+    state.bagPage = 1;
+    return show();
+  }
+
+  if (event.target.closest('#regDirection')) {
+    state.register = {
+      ...state.register,
+      direction: state.register.direction === 'DESC' ? 'ASC' : 'DESC',
+      page: 1
+    };
+    return show();
+  }
+
+  if (event.target.closest('#regReset')) {
+    state.register = { ...REGISTER_DEFAULTS };
+    return show();
+  }
+
+  // Three tabs draw the same pager, so it moves whichever one is showing.
+  const pager = event.target.closest('button[data-page]');
+  if (pager && !pager.disabled) {
+    const page = Number(pager.dataset.page);
+    if (state.tab === 'queue') state.queuePage = page;
+    else if (state.tab === 'bags') state.bagPage = page;
+    else state.register = { ...state.register, page };
     return show();
   }
 
