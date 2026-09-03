@@ -226,12 +226,15 @@ export async function setMemberActive(ctx, { userId, active, reason }) {
       );
     }
 
+    // $3 is cast: inside a CASE whose other branch is NULL, Postgres infers
+    // the parameter as text and the uuid column then rejects it. Without the
+    // ::uuid, deactivating anyone fails.
     await client.query(
       `UPDATE users
           SET active = $2,
-              deactivated_by     = CASE WHEN $2 THEN NULL ELSE $3 END,
+              deactivated_by     = CASE WHEN $2 THEN NULL ELSE $3::uuid END,
               deactivated_at     = CASE WHEN $2 THEN NULL ELSE now() END,
-              deactivated_reason = CASE WHEN $2 THEN NULL ELSE $4 END
+              deactivated_reason = CASE WHEN $2 THEN NULL ELSE $4::text END
         WHERE id = $1`,
       [userId, active, user.id, why || null]
     );
