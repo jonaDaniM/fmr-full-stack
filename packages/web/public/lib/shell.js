@@ -206,16 +206,26 @@ function renderBar(current, onProjectChange) {
   }
 
   document.getElementById('shell-signout').onclick = async () => {
-    await fetch('/api/auth/signout', { method: 'POST' });
+    // Signing out must happen locally whatever the network does. On site wifi
+    // this request fails often, and an unhandled rejection here skipped both
+    // the cache clear and the redirect — so Sign out did nothing visible and
+    // the next person at a shared warehouse terminal found the last one still
+    // signed in. Clear locally first, then tell the server if we can.
     forgetSession();
+    try {
+      await fetch('/api/auth/signout', { method: 'POST' });
+    } catch {
+      // The cookie outlives this, but it is HttpOnly, Secure and expires with
+      // the shift; the session here is gone either way.
+    }
     location.href = '/signin.html';
   };
 
-  // A click anywhere else closes the account menu.
-  document.addEventListener('click', (event) => {
-    const account = bar.querySelector('.account[open]');
-    if (account && !account.contains(event.target)) account.open = false;
-  });
+  // Listeners that live on the document, or on the window, are bound once for
+  // the page rather than per render — renderBar runs twice on load and again
+  // on every project change, so binding them here left a copy behind each
+  // time, each holding this render's closure.
+  bindDocumentListeners(bar);
 
   // Moving between screens is a real page load, so there is a beat where the
   // browser has left one document and not yet painted the next. Marking the
@@ -228,6 +238,20 @@ function renderBar(current, onProjectChange) {
     for (const other of bar.querySelectorAll('.nav-link')) other.classList.remove('going');
     link.classList.add('going');
     document.body.classList.add('navigating');
+  });
+}
+
+/** Bound once per page, however many times the bar is redrawn. */
+let documentListenersBound = false;
+
+function bindDocumentListeners(bar) {
+  if (documentListenersBound) return;
+  documentListenersBound = true;
+
+  // A click anywhere else closes the account menu.
+  document.addEventListener('click', (event) => {
+    const account = bar.querySelector('.account[open]');
+    if (account && !account.contains(event.target)) account.open = false;
   });
 
   // Coming back with the back button reuses the old document, still wearing
