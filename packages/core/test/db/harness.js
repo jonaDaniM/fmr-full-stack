@@ -40,10 +40,24 @@ export async function connect() {
   // Every connection in the pool, including ones opened later, works in here.
   pool.on('connect', (client) => client.query(`SET search_path TO ${schema}, public`));
 
-  await pool.query(`DROP SCHEMA IF EXISTS ${schema} CASCADE; CREATE SCHEMA ${schema}`);
-  await pool.query(`SET search_path TO ${schema}, public`);
-  for (const file of readdirSync(MIGRATIONS).filter((f) => f.endsWith('.sql')).sort()) {
-    await pool.query(readFileSync(join(MIGRATIONS, file), 'utf8'));
+  // Extensions are database-wide, not per-schema, so every test file's
+  // migrations try to create the same one. `IF NOT EXISTS` is not enough:
+  // two files checking at the same moment both decide to create it, and one
+  // loses on pg_extension's unique index. An advisory lock makes the whole
+  // build one-at-a-time, which is also what the schema creation wants.
+  const client = await pool.connect();
+  try {
+    await client.query('SELECT pg_advisory_lock(hashtext($1))', ['fmr-test-schema']);
+    await client.query('CREATE EXTENSION IF NOT EXISTS pgcrypto');
+    await client.query(`DROP SCHEMA IF EXISTS ${schema} CASCADE; CREATE SCHEMA ${schema}`);
+    await client.query(`SET search_path TO ${schema}, public`);
+    for (const file of readdirSync(MIGRATIONS).filter((f) => f.endsWith('.sql')).sort()) {
+      await client.query(readFileSync(join(MIGRATIONS, file), 'utf8'));
+    }
+  } finally {
+    await client.query('SELECT pg_advisory_unlock(hashtext($1))', ['fmr-test-schema'])
+      .catch(() => {});
+    client.release();
   }
 
   services = {

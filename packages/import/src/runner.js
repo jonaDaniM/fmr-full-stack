@@ -12,6 +12,7 @@
  */
 
 import { spawn } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, basename } from 'node:path';
@@ -27,9 +28,29 @@ const here = dirname(fileURLToPath(import.meta.url));
  * Read at the point of use rather than held in a config object, which is how
  * the rest of the system reads its environment.
  */
-const python = () => process.env.FMR_PYTHON || 'python3';
 const extractorHome = () =>
   process.env.FMR_EXTRACT_HOME || join(here, '../../extract-iso');
+
+/**
+ * The interpreter that has the reader installed.
+ *
+ * `FMR_PYTHON` wins — the image sets it to the venv it built (Dockerfile:32),
+ * so a deployment is explicit about this. Locally nobody exports it, and the
+ * fallback was a bare `python3`, which is the one interpreter guaranteed *not*
+ * to have the reader: `README` and `CLAUDE.md` both say to install it into
+ * `packages/extract-iso/.venv`. That interpreter then exits 1 with
+ * "No module named 'iso_bom'", which the caller reports as "those drawings
+ * could not be read. Check they are the right files" — sending someone to
+ * check perfectly good PDFs for a fault that is not in them.
+ *
+ * So look in the venv the instructions tell you to create, and only fall back
+ * to the system interpreter when there is no venv to prefer.
+ */
+const python = () => {
+  if (process.env.FMR_PYTHON) return process.env.FMR_PYTHON;
+  const venv = join(extractorHome(), '.venv', 'bin', 'python3');
+  return existsSync(venv) ? venv : 'python3';
+};
 const timeoutMs = () => Number(process.env.FMR_EXTRACT_TIMEOUT_MS) || 300_000;
 
 /**
@@ -115,6 +136,18 @@ function runExtractor(dir, iwpNumber) {
 
       if (code !== 0) {
         console.error('drawing extractor failed:', err.trim());
+
+        // An interpreter without the reader installed fails before it opens a
+        // single PDF. Blaming the drawings for that sends someone to check
+        // files that are perfectly good, so say what is actually wrong.
+        if (/No module named ['"]?iso_bom/.test(err)) {
+          return reject(new LedgerError(
+            'The drawing reader is not installed for the Python this server runs. '
+              + 'Tell whoever set it up.',
+            'NO_EXTRACTOR'
+          ));
+        }
+
         return reject(new LedgerError(
           'Those drawings could not be read. Check they are the right files.',
           'EXTRACT_FAILED'
