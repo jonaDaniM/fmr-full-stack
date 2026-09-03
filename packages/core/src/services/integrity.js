@@ -67,6 +67,17 @@ const CHECKS = [
     detail:
       'What a line says was issued should equal the sum of its issue transactions, ' +
       'less anything corrected. This is the check that catches a lost or duplicated write.',
+    // Two conventions for undoing an issue meet here.
+    //
+    // This system writes CORRECTION_* rows with a negative quantity, so they
+    // net out in the sum. FMRv3 wrote REVERSAL_* rows with the *positive*
+    // original quantity and let the prefix carry the meaning
+    // (OwnerCorrectionService.gs:1705), and the migration preserved them as
+    // they were. Summing those as written counted an undone issue twice —
+    // three lines in the migrated data reported as mismatches when their
+    // ledgers were correct all along.
+    //
+    // Subtracting the REVERSAL_* rows is what makes the two agree.
     sql: `
       SELECT l.id, h.fmr_number, l.line_number, l.material_description,
              l.qty_issued AS line_issued,
@@ -74,12 +85,16 @@ const CHECKS = [
         FROM fmr_lines l
         JOIN fmr_headers h ON h.id = l.fmr_id
         LEFT JOIN (
-          SELECT fmr_line_id, sum(quantity) AS issued
+          SELECT fmr_line_id,
+                 sum(CASE WHEN transaction_type LIKE 'REVERSAL\\_%' ESCAPE '\\'
+                          THEN -quantity ELSE quantity END) AS issued
             FROM material_transactions
            WHERE transaction_type IN
                  ('DIRECT_ISSUE','ISSUE_FROM_AVAILABLE','ISSUE_FROM_BAG',
                   'CORRECTION_DIRECT_ISSUE','CORRECTION_ISSUE_FROM_AVAILABLE',
-                  'CORRECTION_ISSUE_FROM_BAG')
+                  'CORRECTION_ISSUE_FROM_BAG',
+                  'REVERSAL_DIRECT_ISSUE','REVERSAL_ISSUE_FROM_AVAILABLE',
+                  'REVERSAL_ISSUE_FROM_BAG')
            GROUP BY fmr_line_id
         ) t ON t.fmr_line_id = l.id
        WHERE l.project_id = $1 AND l.active

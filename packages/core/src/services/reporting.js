@@ -499,7 +499,14 @@ export async function getDashboard(client, projectId) {
       [projectId]
     ),
     await client.query(
-      `SELECT status, count(*) AS n, coalesce(sum(qty_pending), 0) AS qty
+      // A request holds its outstanding quantity in the column matching its
+      // status: a pending one in qty_pending, a confirmed one in qty_confirmed,
+      // and a partially confirmed one split across both. Summing qty_pending
+      // alone reported every confirmed backorder as zero — on this project,
+      // 246 requests for 423 units the office had committed to supplying,
+      // shown on the office's own dashboard as nothing at all.
+      `SELECT status, count(*) AS n,
+              coalesce(sum(qty_pending), 0) + coalesce(sum(qty_confirmed), 0) AS qty
          FROM backorder_requests
         WHERE project_id = $1 AND active
         GROUP BY status`,
