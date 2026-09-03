@@ -18,7 +18,12 @@ import { ceilingFor } from './lib/ceilings.js';
 
 // filters: what has been typed into each FMR's filter box, by fmrId. Kept
 // here rather than read off the DOM so a re-render does not lose it.
-const state = { results: [], searching: false, locked: null, filters: new Map() };
+const state = {
+  results: [], searching: false, locked: null, filters: new Map(),
+  // Set when the server had more lines than it would send, so the page can
+  // say so rather than presenting a capped list as the whole answer.
+  truncated: false, limit: 0
+};
 
 // --- actions available on a line ------------------------------------------
 
@@ -256,7 +261,18 @@ function renderResults() {
     return;
   }
 
-  hint.hidden = true;
+  // A short search term matches a great deal — "4" is over a thousand lines —
+  // and a capped list read as the whole answer sends someone looking for
+  // material on an FMR the page never showed them.
+  if (state.truncated) {
+    hint.className = 'hint';
+    hint.innerHTML = `<p>Showing the first ${esc(state.limit)} lines. `
+      + 'There are more — narrow the search to see them.</p>';
+    hint.hidden = false;
+  } else {
+    hint.hidden = true;
+  }
+
   container.innerHTML = groupByFmr(state.results).map(renderGroup).join('');
 }
 
@@ -481,8 +497,10 @@ $('searchForm').onsubmit = async (event) => {
   hideStandby();
 
   try {
-    const { results } = await api(`/api/search?q=${encodeURIComponent(query)}`);
+    const { results, truncated, limit } = await api(`/api/search?q=${encodeURIComponent(query)}`);
     state.results = results;
+    state.truncated = Boolean(truncated);
+    state.limit = Number(limit) || results.length;
     state.filters.clear();   // they belonged to the results being replaced
     renderResults();
   } catch (failure) {
