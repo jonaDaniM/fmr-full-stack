@@ -52,10 +52,10 @@ import { readFile as readProfileFile } from 'node:fs/promises';
 import {
   authenticate, require as requirePermission, verifyGoogleToken,
   findUser, recordLogin, issueSession, readSession, membershipsFor,
-  revokeSession, AuthError
+  revokeSession, auditAuth, AuthError
 } from './auth.js';
 import { once, IdempotencyConflict, IdempotencyInFlight } from './idempotency.js';
-import { createRateLimiter } from './rateLimit.js';
+import { createRateLimiter, callerAddress } from './rateLimit.js';
 
 /**
  * Headers on everything this server sends.
@@ -127,21 +127,39 @@ const route = (method, pattern, handler) =>
 const signInLimiter = createRateLimiter();
 
 route('POST', /^\/api\/auth\/google$/, async (req, res) => {
+  const ip = callerAddress(req);
+
   if (signInLimiter.exceeded(req)) {
+    await auditAuth('SIGNIN_THROTTLED', { email: null, reason: 'rate limit', ip });
     throw new AuthError('Too many sign-in attempts. Wait a few minutes and try again.', 429);
   }
 
   const { idToken } = await readBody(req);
   if (!idToken) throw new AuthError('No sign-in token supplied.', 400);
 
-  const claims = await verifyGoogleToken(idToken);
+  let claims;
+  try {
+    claims = await verifyGoogleToken(idToken);
+  } catch (error) {
+    // The token itself did not check out. Whose it was is not knowable here,
+    // which is worth recording as its own kind of refusal.
+    await auditAuth('SIGNIN_REFUSED', { email: null, reason: error.message, ip });
+    throw error;
+  }
+
   const user = await findUser(claims.email);
 
   // Accounts are provisioned by an admin. An unknown Google account is not
   // an error to explain in detail — just no.
-  if (!user) throw new AuthError('This account has not been set up. Ask your administrator.', 403);
+  if (!user) {
+    await auditAuth('SIGNIN_REFUSED', {
+      email: claims.email, reason: 'no account for this address', ip
+    });
+    throw new AuthError('This account has not been set up. Ask your administrator.', 403);
+  }
 
   await recordLogin(user.id);
+  await auditAuth('SIGNIN', { email: user.email, userId: user.id, ip });
   const token = issueSession(user);
   const projects = await membershipsFor(user.id);
 
@@ -171,9 +189,18 @@ route('POST', /^\/api\/auth\/dev$/, async (req, res) => {
 
   const { email } = await readBody(req);
   const user = await findUser(email);
-  if (!user) throw new AuthError(`No account for ${email}.`, 403);
+  if (!user) {
+    await auditAuth('SIGNIN_REFUSED', {
+      email, reason: 'no account for this address', ip: callerAddress(req)
+    });
+    throw new AuthError(`No account for ${email}.`, 403);
+  }
 
   await recordLogin(user.id);
+  await auditAuth('SIGNIN', {
+    email: user.email, userId: user.id, reason: 'developer sign-in',
+    ip: callerAddress(req)
+  });
   const token = issueSession(user);
 
   // No Secure flag: local development is served over http.
@@ -222,7 +249,14 @@ route('GET', /^\/api\/auth\/dev$/, async (_req, res) => {
 route('POST', /^\/api\/auth\/signout$/, async (req, res) => {
   // Clearing the cookie persuades this browser to forget the token. Revoking
   // the session is what stops a copy of it being used somewhere else.
-  await revokeSession(readSession(req.headers.cookie));
+  const session = readSession(req.headers.cookie);
+  await revokeSession(session);
+
+  if (session) {
+    await auditAuth('SIGNOUT', {
+      email: session.email, userId: session.sub, ip: callerAddress(req)
+    });
+  }
 
   res.setHeader('set-cookie', 'fmr_session=; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=0');
   json(res, 200, { ok: true });

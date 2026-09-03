@@ -13,6 +13,9 @@ import { pool } from '../../core/src/db/pool.js';
 
 const SESSION_TTL_MS = 12 * 60 * 60 * 1000; // a long shift, then sign in again
 
+/** The shape of every id this system hands out, used to refuse junk early. */
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 export class AuthError extends Error {
   constructor(message, status = 401) {
     super(message);
@@ -79,6 +82,47 @@ export async function findUser(email) {
 
 export async function recordLogin(userId) {
   await pool.query('UPDATE users SET last_login_at = now() WHERE id = $1', [userId]);
+}
+
+// --- who tried to get in ---------------------------------------------------
+
+/**
+ * Record a sign-in, a sign-out, or a refusal.
+ *
+ * Nothing in this path used to be written down. Cloud Run logs the status code
+ * and the caller's address, so a refused sign-in was visible as a 403 and
+ * nothing more — not which account was refused, and not why. With 22 people on
+ * the system that is the event most worth being able to ask questions about
+ * later, and it was the one event nobody could.
+ *
+ * These rows go in `audit_log` beside the material history rather than to
+ * stdout: log retention is 30 days, and a question about who was let in gets
+ * asked long after that.
+ *
+ * A refusal has no user and no project, which is why both columns are
+ * nullable. Never record the token or the cookie — the address attempted and
+ * the reason are the whole story, and the credential is not ours to keep.
+ */
+export async function auditAuth(action, { email, userId = null, reason = null, ip = null }) {
+  try {
+    await pool.query(
+      `INSERT INTO audit_log
+         (project_id, entity_type, entity_id, action, payload, user_id, user_email,
+          source_interface)
+       VALUES (NULL,'AUTH',$1,$2,$3,$4,$5,'AUTH')`,
+      [
+        String(email ?? 'unknown').toLowerCase(),
+        action,
+        { reason, ip },
+        userId,
+        email ? String(email).toLowerCase() : null
+      ]
+    );
+  } catch (error) {
+    // Never let bookkeeping refuse a sign-in that should succeed, or mask the
+    // real reason for one that should not.
+    console.error('could not write an auth audit row:', error.message);
+  }
 }
 
 /** Every project this user can reach, with what they may do in each. */
@@ -197,6 +241,13 @@ export async function authenticate(req) {
 
   const projectId = req.headers['x-project-id'];
   if (!projectId) throw new AuthError('No project selected.', 400);
+
+  // The header is client-supplied and goes into the query as a uuid. Postgres
+  // refuses a malformed one — safely, as a parameter, never interpolated — but
+  // it refuses it as a 500 with a stack trace, so anything sending junk here
+  // fills the log with noise that buries real errors. Checking the shape first
+  // makes that a plain 400.
+  if (!UUID.test(projectId)) throw new AuthError('That project id is not valid.', 400);
 
   // One round trip, on the hot path of every API call: the user, whether this
   // session was signed out, and the membership that decides what they may do.

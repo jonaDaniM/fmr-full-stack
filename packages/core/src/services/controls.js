@@ -106,11 +106,14 @@ export async function setControls(ctx, { fieldLocked, importLocked, reason }) {
       ]
     );
 
+    // $1 is the project id twice over — once as a uuid column and once as the
+    // text entity_id. Postgres cannot deduce one type for both, so each use is
+    // cast. Without the ::uuid every pause and resume fails with 42P08.
     await client.query(
       `INSERT INTO audit_log
          (project_id, entity_type, entity_id, action, payload, user_id, user_email,
           source_interface)
-       VALUES ($1,'PROJECT',$1::text,$2,$3,$4,$5,'OWNER')`,
+       VALUES ($1::uuid,'PROJECT',$1::text,$2,$3,$4,$5,'OWNER')`,
       [
         projectId,
         fieldLocked || importLocked ? 'CONTROLS_LOCKED' : 'CONTROLS_UNLOCKED',
@@ -184,57 +187,57 @@ export async function nextBagTagNumber(client, projectId) {
  * material sitting in a state it should not stay in.
  */
 export async function getHealth(client, projectId) {
-  const [controls, stale, unresolved, bags, activity] = await Promise.all([
-    getControls(client, projectId),
-    client.query(
-      `SELECT count(*) AS n FROM backorder_requests
-        WHERE project_id = $1 AND active AND status = 'Pending'
-          AND reported_at < now() - interval '7 days'`,
-      [projectId]
-    ),
-    client.query(
-      `SELECT count(*) AS n FROM field_notices
-        WHERE project_id = $1 AND status = 'Active'
-          AND raised_at < now() - interval '3 days'`,
-      [projectId]
-    ),
-    client.query(
-      `SELECT count(*) AS n FROM bag_tag_items i
-         JOIN bag_tags t ON t.id = i.bag_tag_id
-        WHERE t.project_id = $1 AND i.status = 'Active'
-          AND t.bagged_at < now() - interval '30 days'`,
-      [projectId]
-    ),
-    client.query(
-      `SELECT max(created_at) AS last FROM material_transactions WHERE project_id = $1`,
-      [projectId]
-    )
-  ]);
+  const controls = await getControls(client, projectId);
+
+  // One query, four independent aggregates.
+  //
+  // These were five queries handed to Promise.all on a single client, which
+  // pg serialises internally and warns about — it is removed in pg@9, and
+  // this file's own convention says a client runs one query at a time. As
+  // subqueries they are one round trip instead of five and the rule holds.
+  const { rows } = await client.query(
+    `SELECT
+       (SELECT count(*) FROM backorder_requests
+         WHERE project_id = $1 AND active AND status = 'Pending'
+           AND reported_at < now() - interval '7 days')      AS stale,
+       (SELECT count(*) FROM field_notices
+         WHERE project_id = $1 AND status = 'Active'
+           AND raised_at < now() - interval '3 days')        AS unresolved,
+       (SELECT count(*) FROM bag_tag_items i
+          JOIN bag_tags t ON t.id = i.bag_tag_id
+         WHERE t.project_id = $1 AND i.status = 'Active'
+           AND t.bagged_at < now() - interval '30 days')     AS bags,
+       (SELECT max(created_at) FROM material_transactions
+         WHERE project_id = $1)                              AS last_activity`,
+    [projectId]
+  );
+
+  const counts = rows[0];
 
   const checks = [
     {
       name: 'Backorders awaiting a decision',
       detail: 'Raised more than a week ago and still pending.',
-      count: Number(stale.rows[0].n),
-      ok: Number(stale.rows[0].n) === 0
+      count: Number(counts.stale),
+      ok: Number(counts.stale) === 0
     },
     {
       name: 'Notices the crew has not acted on',
       detail: 'Outstanding for more than three days.',
-      count: Number(unresolved.rows[0].n),
-      ok: Number(unresolved.rows[0].n) === 0
+      count: Number(counts.unresolved),
+      ok: Number(counts.unresolved) === 0
     },
     {
       name: 'Bags sitting unissued',
       detail: 'Material reserved over a month ago and still in the bag.',
-      count: Number(bags.rows[0].n),
-      ok: Number(bags.rows[0].n) === 0
+      count: Number(counts.bags),
+      ok: Number(counts.bags) === 0
     }
   ];
 
   return {
     controls,
-    lastActivityAt: activity.rows[0].last,
+    lastActivityAt: counts.last_activity,
     checks,
     ok: checks.every((c) => c.ok) && !controls.fieldLocked
   };
