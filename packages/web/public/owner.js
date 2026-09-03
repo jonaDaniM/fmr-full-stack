@@ -193,13 +193,22 @@ async function findLines() {
   $('found').innerHTML = skeleton({ rows: 3 });
 
   try {
-    const { results } = await api(`/api/search?q=${encodeURIComponent(query)}`);
+    const { results, truncated, limit } = await api(`/api/search?q=${encodeURIComponent(query)}`);
     if (!results.length) {
       $('found').innerHTML = '<div class="empty"><p>Nothing matched that search.</p></div>';
       return;
     }
 
-    $('found').innerHTML = `<div class="tw"><table>
+    // The server caps what it will send. Somebody looking for the one line
+    // they need to correct has to know the list is not all of it — otherwise
+    // "it isn't here" is indistinguishable from "it is on the next page that
+    // was never sent".
+    const capped = truncated
+      ? `<p class="hint" style="text-align:left;padding:0 0 var(--s-3)">
+           The first ${esc(limit)} lines. Narrow the search to reach the rest.</p>`
+      : '';
+
+    $('found').innerHTML = `${capped}<div class="tw"><table>
       <thead><tr>
         <th class="w-md">FMR</th><th class="w-tiny">Line</th><th class="w-md">Drawing</th>
         <th class="w-grow">Material</th><th class="num w-sm">Issued</th>
@@ -519,7 +528,15 @@ function renderMemberRow(m, owners) {
       ? 'The last active owner must stay — promote someone else first.'
       : null;
 
+  // Email and profile ride on the row rather than being read back out of the
+  // cells. The Role cell renders more than the profile — a CUSTOM member also
+  // gets "Permissions set by hand" — so its textContent was "CUSTOMPermissions
+  // set by hand", which matched no option and left the dialog showing the
+  // first one, Read Only. Saving from there stripped a hand-set permission
+  // set down to read-only access, which is precisely the FMRv3 bug the CUSTOM
+  // profile exists to prevent.
   return `<tr data-user="${esc(m.id)}" data-name="${esc(m.name)}"
+              data-email="${esc(m.email)}" data-profile="${esc(m.profile)}"
               class="${isMe ? 'is-me' : ''}">
     <td>${esc(m.name)}</td>
     <td class="dim mono">${esc(m.email)}</td>
@@ -551,22 +568,42 @@ function renderMemberRow(m, owners) {
  */
 async function changeRole(userId, name) {
   const row = document.querySelector(`tr[data-user="${CSS.escape(userId)}"]`);
-  const email = row.children[1].textContent.trim();
-  const currentProfile = row.children[2].textContent.trim();
+  const { email, profile: currentProfile } = row.dataset;
+
+  // A hand-set permission set matches no named role, so there is nothing to
+  // preselect and every option in the list is a change. Say so, rather than
+  // letting the dialog open on whichever role happens to sort first.
+  const isCustom = !profiles.some((p) => p.key === currentProfile);
 
   await dialog({
     title: `Role for ${name}`,
     lede: email,
     confirmLabel: 'Save role',
+    body: isCustom
+      ? `<p class="dim">This account has permissions set by hand, which no named
+         role matches. Choosing one <strong>replaces</strong> them — close this
+         instead to leave them as they are.</p>`
+      : '',
     fields: [{
       name: 'profile',
       label: 'Role',
       type: 'select',
       value: currentProfile,
-      options: profiles.map((p) => ({ value: p.key, label: p.label })),
+      options: [
+        // Chosen by default for a custom set, so opening the dialog and saving
+        // without touching the list changes nothing.
+        ...(isCustom ? [{ value: '', label: 'Keep the permissions set by hand' }] : []),
+        ...profiles.map((p) => ({ value: p.key, label: p.label }))
+      ],
       hint: profiles.map((p) => `${p.label}: ${p.description}`).join(' · ')
     }],
     onSubmit: async ({ profile }) => {
+      // The "keep" option, or the role they already have: nothing to send.
+      if (!profile || profile === currentProfile) {
+        toast('Left unchanged.');
+        return;
+      }
+
       await api('/api/admin/members', {
         method: 'POST',
         body: JSON.stringify({ email, name, profile })
