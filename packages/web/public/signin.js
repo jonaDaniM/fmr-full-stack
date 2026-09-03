@@ -10,12 +10,12 @@
  */
 
 import { $, esc } from './lib/dom.js';
+import { safeNext } from './lib/safeNext.js';
 
 const params = new URLSearchParams(location.search);
+
 // Where to land after signing in, so a deep link survives an expired session.
-const next = params.get('next') && params.get('next').startsWith('/')
-  ? params.get('next')
-  : '/home.html';
+const next = safeNext(params.get('next'), location.origin);
 
 function note(message, bad = false) {
   const node = $('note');
