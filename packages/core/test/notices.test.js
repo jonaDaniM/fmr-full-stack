@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  describeNotice, planNoticeResolution, NOTICE_KIND, NOTICE_SEVERITY, NOTICE_STATUS
+  describeNotice, planNoticeResolution, settlingQuantity,
+  NOTICE_KIND, NOTICE_SEVERITY, NOTICE_STATUS
 } from '../src/domain/notices.js';
 
 const notice = (over = {}) => ({
@@ -93,4 +94,50 @@ test('locating does not answer a returned notice', () => {
 test('already-resolved notices are left alone', () => {
   const done = notice({ status: NOTICE_STATUS.RESOLVED, qty_outstanding: 0 });
   assert.equal(planNoticeResolution([done], 'CONFIRM_AVAILABLE', 20).resolved, 0);
+});
+
+// --- what an action actually answers ---------------------------------------
+//
+// These cover a bug the domain tests above could not see: planNoticeResolution
+// was always right, and the service handed it the wrong number.
+
+test('bagging settles a rejection by what it newly located, not what was bagged', () => {
+  // 10 bagged, 8 of which were already on the shelf: 2 were newly found.
+  assert.equal(settlingQuantity('BAG', 10, 2), 2,
+    'the other 8 were already located and answer nothing');
+});
+
+test('bagging material that was entirely on the shelf answers nothing', () => {
+  assert.equal(settlingQuantity('BAG', 10, 0), 0,
+    'reserving material already found does not find any more of it');
+});
+
+test('confirming and direct-issuing settle by what they located', () => {
+  assert.equal(settlingQuantity('CONFIRM_AVAILABLE', 6, 6), 6);
+  assert.equal(settlingQuantity('DIRECT_ISSUE', 4, 4), 4);
+});
+
+test('re-raising a backorder answers by the quantity asked for', () => {
+  // Nothing is located by raising a backorder, so the newly-located figure is
+  // zero — using it here would mean a returned notice could never be answered.
+  assert.equal(settlingQuantity('BACKORDER_REQUESTED', 7, 0), 7);
+});
+
+test('a full notice settlement still clears the whole instruction', () => {
+  const [step] = planNoticeResolution(
+    [notice({ qty_notified: 10, qty_outstanding: 10 })],
+    'BAG', settlingQuantity('BAG', 10, 10)
+  ).steps;
+  assert.equal(step.qtyResolved, 10);
+  assert.equal(step.fullyResolved, true);
+});
+
+test('a partial settlement leaves the rest of the instruction outstanding', () => {
+  const [step] = planNoticeResolution(
+    [notice({ qty_notified: 10, qty_outstanding: 10 })],
+    'BAG', settlingQuantity('BAG', 10, 2)
+  ).steps;
+  assert.equal(step.qtyResolved, 2);
+  assert.equal(step.fullyResolved, false,
+    'the crew still has 8 to find, and must still be told so');
 });

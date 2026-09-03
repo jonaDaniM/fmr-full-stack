@@ -92,6 +92,26 @@ export function describeNotice(decision, { quantity, uom, adminNotes, fullyDecid
 }
 
 /**
+ * How much of an action actually answers an instruction.
+ *
+ * A rejected notice says: the office will not supply this, go and find it. So
+ * what settles it is material *newly located*, not the quantity on the request.
+ * Bagging 10 where 8 were already on the shelf finds 2 — and passing 10 here
+ * closed the whole notice, taking the instruction off the crew's card with the
+ * material still unlocated.
+ *
+ * A returned notice is answered by re-raising the backorder with better
+ * information, so there the quantity asked for is the right measure.
+ *
+ * @param {string} action
+ * @param {number} requested     what the crew asked to do
+ * @param {number} newlyLocated  what that actually found (see `applyBag`)
+ */
+export function settlingQuantity(action, requested, newlyLocated) {
+  return action === 'BACKORDER_REQUESTED' ? num(requested) : num(newlyLocated);
+}
+
+/**
  * Work out how much of a line's outstanding notices a field action settles.
  *
  * Locating material answers a rejected notice directly — the crew was told to

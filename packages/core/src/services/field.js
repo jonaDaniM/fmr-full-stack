@@ -19,6 +19,7 @@ import {
   planReturnedResubmission, BACKORDER_STATUS
 } from '../domain/backorder.js';
 import { settleNotices, sweepStaleNotices } from './notices.js';
+import { settlingQuantity } from '../domain/notices.js';
 import { assertFieldOpen, nextBagTagNumber } from './controls.js';
 
 /** Caps on the free-text fields a crew types, matching FMRv3. */
@@ -422,8 +423,11 @@ export async function performFieldAction(ctx, req) {
     const settlement = await settleBackorders(client, line, state, newlyLocated);
     await persistState(client, line, state, user.id);
 
-    // The crew was told to do something; doing it settles the notice.
-    const notices = await settleNotices(client, line, action, Number(req.quantity));
+    // The crew was told to do something; doing it settles the notice — but
+    // only by as much as they actually did. The rule is in the domain.
+    const notices = await settleNotices(
+      client, line, action, settlingQuantity(action, req.quantity, newlyLocated)
+    );
 
     if (!transactionWritten) {
       await recordTransaction(client, line, action, Number(req.quantity), user, {

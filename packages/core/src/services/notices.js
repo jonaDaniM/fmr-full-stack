@@ -81,8 +81,20 @@ export async function settleNotices(client, line, action, quantity) {
 }
 
 /**
- * Close notices that no longer mean anything — the line is finished, or the
- * request behind them is gone. Keeps stale instructions off the crew's card.
+ * Close notices that no longer mean anything: the line has nothing left
+ * outstanding, so its instructions cannot be acted on.
+ *
+ * This used to also sweep a notice whose source request was no longer active,
+ * which was wrong in the one case that matters. Rejecting a backorder
+ * deactivates the request *and* raises the notice telling the crew to source
+ * the material themselves — so "the request is not active" is true the instant
+ * the notice exists, and reading that as staleness closed the instruction
+ * before anyone could act on it. A rejected notice is settled by locating the
+ * material, which `settleNotices` does; it is never dismissed.
+ *
+ * Nor was the other reading of that clause reachable: nothing deletes a
+ * request, and `field_notices.source_request_id` cascades, so a notice whose
+ * request row had vanished would have been deleted with it.
  */
 export async function sweepStaleNotices(client, lineId) {
   const { rowCount } = await client.query(
@@ -93,11 +105,7 @@ export async function sweepStaleNotices(client, lineId) {
       WHERE n.fmr_line_id = l.id
         AND l.id = $1
         AND n.status = 'Active'
-        AND (l.qty_remaining_requirement <= 0
-             OR NOT EXISTS (
-               SELECT 1 FROM backorder_requests b
-                WHERE b.id = n.source_request_id AND b.active
-             ))`,
+        AND l.qty_remaining_requirement <= 0`,
     [lineId]
   );
   return rowCount;
