@@ -243,7 +243,7 @@ async function reserveIntoBag(client, line, req, user, correlationId) {
      VALUES ($1,$2,$3,$4,$5,$6,$7,'Active')
      ON CONFLICT (project_id, tag_number)
        DO UPDATE SET updated_at = now()
-     RETURNING id, status`,
+     RETURNING id, status, fmr_id`,
     [
       line.project_id, tagNumber, line.fmr_id, line.iso_key, storageLocation,
       user.id, req.performedByName ?? user.display_name
@@ -255,12 +255,34 @@ async function reserveIntoBag(client, line, req, user, correlationId) {
     throw new LedgerError(`Bag tag ${tagNumber} is already closed.`, 'BAG_CLOSED');
   }
 
+  // A tag belongs to one FMR. Typing a number already in use on another one
+  // used to adopt it silently: the material went in, but the office's
+  // active-bag queue reads the FMR number, line and location off the *tag*, so
+  // it showed the wrong FMR and sent someone to the wrong rack. FMRv3 minted a
+  // fresh number every time and never had to answer this.
+  if (tag.fmr_id !== line.fmr_id) {
+    const { rows: owner } = await client.query(
+      'SELECT fmr_number FROM fmr_headers WHERE id = $1', [tag.fmr_id]
+    );
+    throw new LedgerError(
+      `Bag tag ${tagNumber} is already in use on ${owner[0]?.fmr_number ?? 'another FMR'}. ` +
+      'Use a different tag number.',
+      'BAG_TAG_IN_USE'
+    );
+  }
+
   const quantity = Number(req.quantity);
 
-  // One item row per line per bag: a second bagging of the same line adds to it.
+  // One item row per line per bag: a second bagging of the same line adds to
+  // it. Two rows would leave the line's total right and the bag's wrong —
+  // ISSUE_FROM_BAG reads one row, so a crew with 50 in the bag was refused
+  // above 30 and had to issue it in two goes.
   await client.query(
     `INSERT INTO bag_tag_items (bag_tag_id, fmr_line_id, qty_bagged, status)
-     VALUES ($1,$2,$3,'Active')`,
+     VALUES ($1,$2,$3,'Active')
+     ON CONFLICT (bag_tag_id, fmr_line_id) WHERE status = 'Active'
+     DO UPDATE SET qty_bagged = bag_tag_items.qty_bagged + EXCLUDED.qty_bagged,
+                   updated_at = now()`,
     [tag.id, line.id, quantity]
   );
 

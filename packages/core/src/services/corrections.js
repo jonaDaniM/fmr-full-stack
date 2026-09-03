@@ -66,6 +66,92 @@ export async function getCorrectableHistory(client, projectId, lineId) {
   return [...groups.values()];
 }
 
+/**
+ * Undo a correction's effect on the bag it touched.
+ *
+ * The ledger's `bagged` total and the bag's own `qty_bagged` are two records of
+ * the same steel, and a correction has to move both. Reversing only the line
+ * left the bag saying it still held material the line had given up — a phantom
+ * bag sitting on the office's active-bag queue — or, correcting an issue, left
+ * the material locked: the line counted it as bagged while the bag would not
+ * release it, and it could be issued from neither.
+ *
+ * The two directions, as FMRv3 wrote them (OwnerCorrectionService.gs:1384):
+ *
+ *   BAG              the reservation never happened — take it out of the bag.
+ *   ISSUE_FROM_BAG   the issue never happened — put it back in.
+ *
+ * Correcting a BAG that has already been partly issued would take the bag below
+ * what left it, so that is refused rather than forced: the issue is the later
+ * event and has to be corrected first.
+ */
+async function reverseBagEffect(client, lineId, inverse) {
+  const type = String(inverse.transaction_type).replace(/^CORRECTION_/, '');
+  const bagTagId = type === 'BAG' ? inverse.targetBagTagId : inverse.sourceBagTagId;
+  if (!bagTagId || (type !== 'BAG' && type !== 'ISSUE_FROM_BAG')) return;
+
+  // The quantity on an inverse is negative; the movement is its magnitude.
+  const quantity = Math.abs(Number(inverse.quantity));
+
+  const { rows } = await client.query(
+    `SELECT * FROM bag_tag_items
+      WHERE bag_tag_id = $1 AND fmr_line_id = $2
+      ORDER BY created_at
+      FOR UPDATE`,
+    [bagTagId, lineId]
+  );
+  const item = rows[0];
+  if (!item) return;
+
+  if (type === 'BAG') {
+    const bagged = Number(item.qty_bagged) - quantity;
+    const issuedFrom = Number(item.qty_issued_from_bag);
+
+    if (bagged < issuedFrom - 1e-6) {
+      throw new LedgerError(
+        `${quantity} cannot be taken back out of bag ${item.bag_tag_id}: ` +
+        `${issuedFrom} has already been issued from it. Correct the issue first.`,
+        'BAG_ALREADY_ISSUED'
+      );
+    }
+
+    if (bagged <= 1e-6) {
+      await client.query(
+        `DELETE FROM bag_tag_items WHERE id = $1`, [item.id]
+      );
+    } else {
+      await client.query(
+        `UPDATE bag_tag_items SET qty_bagged = $2, updated_at = now() WHERE id = $1`,
+        [item.id, bagged]
+      );
+    }
+  }
+
+  if (type === 'ISSUE_FROM_BAG') {
+    const issuedFrom = Math.max(0, Number(item.qty_issued_from_bag) - quantity);
+    await client.query(
+      `UPDATE bag_tag_items
+          SET qty_issued_from_bag = $2, status = 'Active', updated_at = now()
+        WHERE id = $1`,
+      [item.id, issuedFrom]
+    );
+  }
+
+  // The tag closes when nothing active is left under it, and reopens when
+  // something is put back.
+  await client.query(
+    `UPDATE bag_tags t
+        SET status = CASE WHEN EXISTS (
+                       SELECT 1 FROM bag_tag_items i
+                        WHERE i.bag_tag_id = t.id AND i.status = 'Active'
+                          AND i.qty_remaining_in_bag > 0
+                     ) THEN 'Active' ELSE 'Closed' END,
+            updated_at = now()
+      WHERE t.id = $1`,
+    [bagTagId]
+  );
+}
+
 /** Load the transactions of one action group, for previewing or applying. */
 async function loadGroup(client, projectId, correlationId) {
   const { rows } = await client.query(
@@ -171,6 +257,10 @@ export async function applyCorrection(ctx, { correlationId, reason }) {
           `Corrects transaction ${inverse.reversesTransactionId}: ${plan.reason}`
         ]
       );
+
+      // The bag holding this material is a second record of it, and has to
+      // move with the ledger.
+      await reverseBagEffect(client, line.id, inverse);
     }
 
     await client.query(
