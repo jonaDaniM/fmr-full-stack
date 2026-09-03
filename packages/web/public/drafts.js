@@ -14,6 +14,7 @@ import { $, esc, n, day, skeleton } from './lib/dom.js';
 import { dialog, confirmAction, askReason } from './lib/modal.js';
 import { toast, toastError } from './lib/toast.js';
 import { initShell } from './lib/shell.js';
+import { parsePaste } from './lib/paste.js';
 
 const state = { tab: 'queue', drafts: null, editing: null, options: {} };
 
@@ -312,24 +313,6 @@ function readHeader() {
     dateRequired: $('dateRequired').value || null,
     priority: $('priority').value || null
   };
-}
-
-/** Same shape the server parses; kept here so the count can be shown first. */
-function parsePaste(text) {
-  const rows = String(text ?? '').split(/\r?\n/).map((r) => r.trim()).filter(Boolean);
-  if (!rows.length) return [];
-
-  const split = (row) => (row.includes('\t') ? row.split('\t') : row.split(','))
-    .map((cell) => cell.trim());
-
-  const first = split(rows[0]);
-  const header = /commodity|code|desc|qty|quant/i.test(first.join(' '))
-    && !/^\d/.test(first[first.length - 1] ?? '');
-
-  return rows.slice(header ? 1 : 0).map((row) => {
-    const [commodityCode, size, description, quantity, uom, storageLocation] = split(row);
-    return { commodityCode, size, description, quantity, uom, storageLocation };
-  });
 }
 
 async function openDraft(itemId, { keepScroll = false } = {}) {
