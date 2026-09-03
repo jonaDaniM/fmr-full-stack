@@ -12,7 +12,7 @@
  */
 
 import { api, upload as uploadWithProgress, idempotencyKey } from './lib/api.js';
-import { $, esc, n } from './lib/dom.js';
+import { $, esc, editableNumber } from './lib/dom.js';
 import { confirmAction } from './lib/modal.js';
 import { toast, toastError } from './lib/toast.js';
 import { initShell } from './lib/shell.js';
@@ -311,7 +311,7 @@ function renderItem(item) {
           <td class="mono" contenteditable data-field="commodityCode">${esc(l.commodityCode ?? '')}</td>
           <td class="mono" contenteditable data-field="size">${esc(l.size ?? '')}</td>
           <td contenteditable data-field="description">${esc(l.description ?? '')}</td>
-          <td class="num" contenteditable data-field="quantity">${n(l.quantity)}</td>
+          <td class="num" contenteditable data-field="quantity">${esc(editableNumber(l.quantity))}</td>
           <td class="mono" contenteditable data-field="uom">${esc(l.uom ?? '')}</td>
         </tr>`).join('')}
       </tbody>

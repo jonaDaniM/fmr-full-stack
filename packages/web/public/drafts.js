@@ -10,7 +10,7 @@
  */
 
 import { api, idempotencyKey } from './lib/api.js';
-import { $, esc, n, day, skeleton } from './lib/dom.js';
+import { $, esc, n, day, skeleton, editableNumber } from './lib/dom.js';
 import { dialog, confirmAction, askReason } from './lib/modal.js';
 import { toast, toastError } from './lib/toast.js';
 import { initShell } from './lib/shell.js';
@@ -180,7 +180,7 @@ function renderLines(lines) {
           <td class="mono" contenteditable data-field="commodityCode">${esc(l.commodityCode ?? '')}</td>
           <td class="mono" contenteditable data-field="size">${esc(l.size ?? '')}</td>
           <td contenteditable data-field="description">${esc(l.description ?? '')}</td>
-          <td class="num" contenteditable data-field="quantity">${n(l.quantity)}</td>
+          <td class="num" contenteditable data-field="quantity">${esc(editableNumber(l.quantity))}</td>
           <td class="mono" contenteditable data-field="uom">${esc(l.uom ?? '')}</td>
           <td contenteditable data-field="storageLocation">${esc(l.storageLocation ?? '')}</td>
           <td><div class="rowacts">

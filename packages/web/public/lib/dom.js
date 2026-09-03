@@ -22,6 +22,21 @@ export const esc = (s) => String(s ?? '').replace(/[&<>"']/g,
 /** A quantity, grouped and trimmed. Missing reads as zero, never as a dash. */
 export const n = (v) => Number(v ?? 0).toLocaleString(undefined, { maximumFractionDigits: 2 });
 
+/**
+ * A number for a cell that will be read back and saved.
+ *
+ * `n()` groups for the reader's locale, and the draft and import line editors
+ * round-trip their cells: editing any cell in a row sends every cell in that
+ * row. On an English machine "1,200" survives, because the server strips the
+ * comma — but a browser set to German renders 1234.5 as "1.234,5", which the
+ * server reads as 1.2345, and a French one writes "1 234,5", which it cannot
+ * read at all. Either way a quantity nobody touched is silently rewritten.
+ *
+ * So an editable cell holds the plain value. Grouping is for figures that are
+ * only ever read.
+ */
+export const editableNumber = (v) => (v == null || v === '' ? '' : String(v));
+
 /** A quantity that may legitimately be absent — for display only, never posted. */
 export const nOrDash = (v) => (v == null || v === '' ? '—' : n(v));
 
