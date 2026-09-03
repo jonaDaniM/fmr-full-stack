@@ -15,6 +15,7 @@ import { $, esc, n, when, skeleton, emptyRow } from './lib/dom.js';
 import { dialog, confirmAction, askReason } from './lib/modal.js';
 import { toast, toastError } from './lib/toast.js';
 import { initShell, session } from './lib/shell.js';
+import { destinationFor } from './lib/checkRoutes.js';
 
 const state = { tab: 'health' };
 
@@ -32,11 +33,13 @@ async function renderHealth() {
             ? ` by ${esc(health.controls.lockedBy)}` : ''}. The crew is shown:
            "${esc(health.controls.reason ?? '')}"`
         : 'Pause during a cutover or a stock count. Crews see the reason you give.'}</p>
-      <div class="row">
+      <div class="row row-entry">
         ${locked
           ? '<button type="button" class="btn btn-primary" id="unlock">Resume work</button>'
-          : `<input id="reason" type="text" placeholder="Why are you pausing? The crew sees this.">
-             <button type="button" class="btn btn-danger" id="lock">Pause</button>`}
+          : `<label class="vh" for="reason">Why are you pausing?</label>
+             <input id="reason" type="text" autocomplete="off"
+                    placeholder="Why are you pausing? The crew sees this.">
+             <button type="button" class="btn btn-danger btn-fit" id="lock">Pause</button>`}
       </div>
     </div>
 
@@ -98,6 +101,16 @@ async function renderHealth() {
   });
 }
 
+/** A check that found nothing needs no route; one that found something does. */
+function renderDestination(check) {
+  const to = destinationFor(check);
+  if (!to) return '';
+
+  return to.tab
+    ? `<button type="button" class="linkish" data-goto-tab="${esc(to.tab)}">${esc(to.label)}</button>`
+    : `<a class="linkish" href="${esc(to.href)}">${esc(to.label)}</a>`;
+}
+
 const renderCheck = (c) => `
   <div class="check ${c.ok ? '' : 'bad'}">
     <span class="dot"></span>
@@ -105,6 +118,7 @@ const renderCheck = (c) => `
       <span class="name">${esc(c.name)}</span>
       <div class="detail">${esc(c.detail)}</div>
       ${renderExamples(c)}
+      ${renderDestination(c)}
     </span>
     <span class="n">${esc(c.count)}</span>
   </div>`;
@@ -634,7 +648,8 @@ async function renderLists() {
   $('view').innerHTML = `
     <p class="hint" style="text-align:left;padding:0 0 var(--s-4)">
       These are the choices the crews see. Retiring a value hides it from new
-      entries; anything already recorded against it keeps it.
+      entries; anything already recorded against it keeps it. Values marked
+      shared belong to every project and are not edited here.
     </p>
 
     ${names.map((name) => {
@@ -654,7 +669,10 @@ async function renderLists() {
               <td>${v.active ? '<span class="pill">In use</span>'
                               : '<span class="pill pill-warn">Retired</span>'}</td>
               <td><div class="rowacts">
-                ${v.shared ? '<span class="dim">—</span>'
+                ${v.shared
+                  ? '<span class="dim" title="Shared values are the same on every project. '
+                    + 'This screen edits only the values belonging to this one.'
+                    + '">Shared &mdash; not editable here</span>'
                   : `<button type="button" class="btn btn-sm" data-list-toggle="${esc(v.id)}"
                              data-active="${!v.active}" data-value="${esc(v.value)}">
                        ${v.active ? 'Retire' : 'Restore'}</button>`}
@@ -707,18 +725,59 @@ async function show() {
   }
 }
 
-$('tabs').onclick = (event) => {
-  const button = event.target.closest('button[data-tab]');
-  if (!button) return;
+/**
+ * Move to a tab and draw it.
+ *
+ * One place, so a jump from a failing check leaves the tab strip in the same
+ * state a click on it would have — the strip used to be updated only by its
+ * own handler, so anything else that changed `state.tab` left the highlight
+ * behind on the tab you had left.
+ */
+function switchTab(name) {
+  if (!VIEWS[name]) return;
 
-  state.tab = button.dataset.tab;
+  state.tab = name;
   for (const tab of $('tabs').querySelectorAll('button')) {
-    tab.setAttribute('aria-selected', String(tab === button));
+    const on = tab.dataset.tab === name;
+    tab.setAttribute('aria-selected', String(on));
+    // Only the selected tab is a tab stop; the arrow keys move between them.
+    tab.tabIndex = on ? 0 : -1;
   }
   show();
+}
+
+$('tabs').onclick = (event) => {
+  const button = event.target.closest('button[data-tab]');
+  if (button) switchTab(button.dataset.tab);
 };
 
+/**
+ * Arrow keys move along the tab strip, which is what a tablist promises.
+ *
+ * The buttons carry role="tab", so a screen reader tells the user to use the
+ * arrow keys — and nothing was listening for them.
+ */
+$('tabs').addEventListener('keydown', (event) => {
+  const step = { ArrowRight: 1, ArrowLeft: -1, Home: 'first', End: 'last' }[event.key];
+  if (!step) return;
+
+  const tabs = [...$('tabs').querySelectorAll('button[data-tab]')];
+  const here = tabs.findIndex((t) => t.dataset.tab === state.tab);
+
+  const next = step === 'first' ? tabs[0]
+    : step === 'last' ? tabs[tabs.length - 1]
+      : tabs[(here + step + tabs.length) % tabs.length];
+
+  event.preventDefault();
+  next.focus();
+  switchTab(next.dataset.tab);
+});
+
 $('view').addEventListener('click', async (event) => {
+  // A failing check that names work should be able to go to it.
+  const goto = event.target.closest('button[data-goto-tab]');
+  if (goto) return switchTab(goto.dataset.gotoTab);
+
   const history = event.target.closest('button[data-history]');
   if (history) return showHistory(history.dataset.history);
 

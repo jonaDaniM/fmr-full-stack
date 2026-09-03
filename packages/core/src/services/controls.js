@@ -216,18 +216,22 @@ export async function getHealth(client, projectId) {
 
   const checks = [
     {
+      // A code, so a screen can route to the work without matching on prose.
+      code: 'STALE_BACKORDERS',
       name: 'Backorders awaiting a decision',
       detail: 'Raised more than a week ago and still pending.',
       count: Number(counts.stale),
       ok: Number(counts.stale) === 0
     },
     {
+      code: 'UNRESOLVED_NOTICES',
       name: 'Notices the crew has not acted on',
       detail: 'Outstanding for more than three days.',
       count: Number(counts.unresolved),
       ok: Number(counts.unresolved) === 0
     },
     {
+      code: 'STALE_BAGS',
       name: 'Bags sitting unissued',
       detail: 'Material reserved over a month ago and still in the bag.',
       count: Number(counts.bags),

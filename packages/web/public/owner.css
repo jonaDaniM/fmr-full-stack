@@ -21,6 +21,33 @@
 }
 .panel .row input[type='text'], .panel .row input[type='email'] { flex: 1 1 210px; min-width: 0; }
 
+/*
+ * A button that stays button-sized.
+ *
+ * `.row` wraps, and a text input beside it takes `flex: 1 1 210px` — so on a
+ * wide screen the input filled the line and pushed the button onto its own,
+ * where it stretched to the full width of the panel. That made Pause, which
+ * stops every crew on site, the largest and reddest element on the screen:
+ * the page read as though pausing were the thing it was for.
+ */
+.btn-fit { flex: 0 0 auto; align-self: flex-start; width: auto; }
+
+/*
+ * The pause row is a sentence and a button, not a full-bleed banner.
+ *
+ * The input's own `flex: 1 1 210px` above wins on a wide row, so it filled the
+ * line and pushed the button to the next one — where, as the only item on that
+ * line, it stretched the full width. Capping the row and letting the input
+ * shrink keeps both on one line at every width that fits them.
+ */
+.panel .row-entry { max-width: 640px; flex-wrap: nowrap; }
+.panel .row-entry input[type='text'] { flex: 1 1 auto; }
+
+@media (max-width: 520px) {
+  /* Below this the two cannot share a line; the button then leads its own. */
+  .panel .row-entry { flex-wrap: wrap; }
+}
+
 /* One check: a dot, what it is, and how many rows it found. */
 .check {
   display: flex; align-items: flex-start; gap: var(--s-3);
@@ -42,6 +69,21 @@
   font-family: var(--font-display); font-weight: 650;
 }
 .check .grow { flex: 1; min-width: 0; }
+
+/*
+ * The way out of a failing check.
+ *
+ * A link that has to sit inside a check without becoming a second heading, and
+ * a <button> that has to read as a link — the tab jumps stay in this document,
+ * so they cannot be anchors.
+ */
+.linkish {
+  display: inline-block; margin-top: var(--s-2);
+  font: inherit; font-size: var(--t-sm); font-weight: 600;
+  color: var(--accent); background: none; border: 0; padding: 0;
+  text-decoration: underline; text-underline-offset: 2px; cursor: pointer;
+}
+.linkish:hover { text-decoration-thickness: 2px; }
 
 /* The correction preview: what the ledger reads now, and what it would read. */
 .diff h4 {
