@@ -33,10 +33,18 @@ export function isoCandidates(query) {
     return [body];
   }
 
-  const match = body.match(/^(.*)-(\d{2})$/);
+  // One or two digits. Sheets are written both ways and the shorter is by far
+  // the commoner: of the real drawings, 628 use a single-digit sheet and 56 use
+  // two. Matching only two digits meant a crew typing "LP131-SC-824001-5" — the
+  // way it is written on the sheet — got nothing back for 91% of the lines on
+  // the project, while the same drawing without the suffix found all 24.
+  const match = body.match(/^(.*)-(\d{1,2})$/);
   if (!match) return [body];
 
   const [, drawing, sheet] = match;
+
+  // Both readings are tried, so guessing at a sheet costs nothing: a drawing
+  // whose number genuinely ends in "-5" still matches as itself.
   const candidates = [body, `${drawing}|${sheet}`];
 
   // "05" and "5" are the same sheet to a human.
