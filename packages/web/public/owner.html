@@ -25,16 +25,22 @@
     </div>
   </div>
 
-  <div class="tabs" role="tablist" id="tabs">
-    <button type="button" role="tab" data-tab="health" aria-selected="true">Health</button>
-    <button type="button" role="tab" data-tab="correct" aria-selected="false">Corrections</button>
-    <button type="button" role="tab" data-tab="notices" aria-selected="false">Notices</button>
-    <button type="button" role="tab" data-tab="integrity" aria-selected="false">Integrity</button>
-    <button type="button" role="tab" data-tab="users" aria-selected="false">Users</button>
-    <button type="button" role="tab" data-tab="lists" aria-selected="false">Lists</button>
+  <div class="tabs" role="tablist" aria-label="Owner sections" id="tabs">
+    <button type="button" role="tab" data-tab="health" aria-selected="true"
+            aria-controls="view" tabindex="0">Health</button>
+    <button type="button" role="tab" data-tab="correct" aria-selected="false"
+            aria-controls="view" tabindex="-1">Corrections</button>
+    <button type="button" role="tab" data-tab="notices" aria-selected="false"
+            aria-controls="view" tabindex="-1">Notices</button>
+    <button type="button" role="tab" data-tab="integrity" aria-selected="false"
+            aria-controls="view" tabindex="-1">Integrity</button>
+    <button type="button" role="tab" data-tab="users" aria-selected="false"
+            aria-controls="view" tabindex="-1">Users</button>
+    <button type="button" role="tab" data-tab="lists" aria-selected="false"
+            aria-controls="view" tabindex="-1">Lists</button>
   </div>
 
-  <div id="view"></div>
+  <div id="view" role="tabpanel" tabindex="0"></div>
 </main>
 
 <script type="module" src="/owner.js"></script>
