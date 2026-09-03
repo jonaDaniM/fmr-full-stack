@@ -298,15 +298,22 @@ async function reserveIntoBag(client, line, req, user, correlationId) {
 }
 
 /**
- * Raise a backorder.
+ * Work out how much of a backorder submission is genuinely new.
  *
- * If the office previously returned a request for this line asking for more
- * information, this submission is the answer to it — so it revives that
- * request rather than opening a second one alongside it.
+ * A returned request already holds its quantity as pending on the line, and
+ * re-raising it is the crew's answer, not a second ask. Only the part no
+ * returned request absorbs adds to the line's pending total — so only that
+ * part is measured against the ceiling.
+ *
+ * Getting this the other way round broke the whole return-and-resubmit
+ * workflow: the office returned 60 asking for a heat number, the crew supplied
+ * it, and the resubmission was refused for duplicating a commitment — the
+ * commitment being the returned request it was answering. There was no
+ * quantity that worked, and the notice stayed on the card. `applyBackorderRequest`
+ * was reached before `planReturnedResubmission` could say how much was new,
+ * which is why the resubmission rule was well tested and never once ran.
  */
-async function raiseBackorder(client, line, req, user, correlationId) {
-  const quantity = Number(req.quantity);
-
+async function planBackorder(client, line, quantity) {
   const { rows: existing } = await client.query(
     `SELECT * FROM backorder_requests
       WHERE fmr_line_id = $1 AND active
@@ -314,8 +321,17 @@ async function raiseBackorder(client, line, req, user, correlationId) {
     [line.id]
   );
 
-  const plan = planReturnedResubmission(existing, quantity);
+  return planReturnedResubmission(existing, Number(quantity));
+}
 
+/**
+ * Raise a backorder.
+ *
+ * If the office previously returned a request for this line asking for more
+ * information, this submission is the answer to it — so it revives that
+ * request rather than opening a second one alongside it.
+ */
+async function raiseBackorder(client, line, req, user, correlationId, plan) {
   for (const step of plan.steps) {
     await client.query(
       `UPDATE backorder_requests
@@ -432,11 +448,20 @@ export async function performFieldAction(ctx, req) {
         transactionWritten = true;
         break;
 
-      case ACTIONS.BACKORDER_REQUESTED:
+      case ACTIONS.BACKORDER_REQUESTED: {
         if (!req.reason) throw new LedgerError('A backorder reason is required.', 'MISSING_FIELD');
-        applyBackorderRequest(state, req.quantity);
-        backorderRequestId = await raiseBackorder(client, line, req, user, correlationId);
+        if (!(Number(req.quantity) > 0)) {
+          throw new LedgerError('Backorder quantity must be greater than zero.');
+        }
+        // What returned requests absorb is already pending on the line; only
+        // the remainder is a new ask, so only that is put through the ceiling.
+        const plan = await planBackorder(client, line, req.quantity);
+        if (plan.remainder > 0) applyBackorderRequest(state, plan.remainder);
+        backorderRequestId = await raiseBackorder(
+          client, line, req, user, correlationId, plan
+        );
         break;
+      }
 
       default:
         throw new LedgerError(`Unsupported field action: ${action}`, 'BAD_ACTION');

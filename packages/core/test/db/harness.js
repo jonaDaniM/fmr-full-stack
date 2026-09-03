@@ -11,7 +11,7 @@
 
 import { readdirSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { dirname, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const MIGRATIONS = join(here, '../../../../db/migrations');
@@ -22,14 +22,26 @@ export const enabled = Boolean(DATABASE_URL);
 let pool;
 let services;
 
-/** Load the schema once, then hand back the service layer bound to it. */
+/**
+ * Load the schema once, then hand back the service layer bound to it.
+ *
+ * Each test file runs in its own process and builds the schema from the
+ * migrations, so they get a schema each — named for the file — rather than
+ * racing to drop and rebuild a shared `public`.
+ */
 export async function connect() {
   if (services) return services;
+
+  const schema = `test_${basename(process.argv[1] ?? 'db', '.test.js').replace(/\W/g, '_')}`;
 
   process.env.DATABASE_URL = DATABASE_URL;
   ({ pool } = await import('../../src/db/pool.js'));
 
-  await pool.query('DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public');
+  // Every connection in the pool, including ones opened later, works in here.
+  pool.on('connect', (client) => client.query(`SET search_path TO ${schema}, public`));
+
+  await pool.query(`DROP SCHEMA IF EXISTS ${schema} CASCADE; CREATE SCHEMA ${schema}`);
+  await pool.query(`SET search_path TO ${schema}, public`);
   for (const file of readdirSync(MIGRATIONS).filter((f) => f.endsWith('.sql')).sort()) {
     await pool.query(readFileSync(join(MIGRATIONS, file), 'utf8'));
   }

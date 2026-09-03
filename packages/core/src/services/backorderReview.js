@@ -10,7 +10,7 @@ import { withTransaction } from '../db/pool.js';
 import { LedgerError, lineState, lineStatus } from '../domain/ledger.js';
 import { planAdminDecision, BACKORDER_STATUS } from '../domain/backorder.js';
 import { serializeLine, HEADER_ROLLUP_SQL } from './field.js';
-import { raiseNotice, noticesForLines } from './notices.js';
+import { raiseNotice, noticesForLines, sweepStaleNotices } from './notices.js';
 
 const QUEUE_PAGE = Object.freeze({ default: 25, min: 5, max: 200 });
 
@@ -180,9 +180,16 @@ export async function decideBackorder(ctx, req) {
     );
 
     // Tell the crew what was decided, on the line they raised it from.
+    //
+    // A partial return moves the returned quantity onto the split request, so
+    // that is what the notice is about. Pointing it at the original left the
+    // notice attached to a request holding none of the quantity: answering it
+    // by re-raising was refused, because the split still held that quantity as
+    // pending, and once the original settled the notice was swept off the card
+    // while the split went on waiting for an answer nobody could give.
     const notice = await raiseNotice(client, {
       line,
-      request,
+      request: splitRequestId ? { id: splitRequestId } : request,
       decision,
       quantity: plan.quantity,
       uom: line.uom,
@@ -206,6 +213,10 @@ export async function decideBackorder(ctx, req) {
         user.id, user.email, correlationId
       ]
     );
+
+    // A decision can close the request an older notice was raised from — a
+    // partial return settles the original and splits the rest onto a new row.
+    await sweepStaleNotices(client, line.id);
 
     // Confirming or rejecting changes what the line is waiting on, which can
     // change how the FMR reads in the register.

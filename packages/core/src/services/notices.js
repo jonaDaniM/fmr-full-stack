@@ -81,31 +81,56 @@ export async function settleNotices(client, line, action, quantity) {
 }
 
 /**
- * Close notices that no longer mean anything: the line has nothing left
- * outstanding, so its instructions cannot be acted on.
+ * Close notices that no longer mean anything.
  *
- * This used to also sweep a notice whose source request was no longer active,
- * which was wrong in the one case that matters. Rejecting a backorder
- * deactivates the request *and* raises the notice telling the crew to source
- * the material themselves — so "the request is not active" is true the instant
- * the notice exists, and reading that as staleness closed the instruction
- * before anyone could act on it. A rejected notice is settled by locating the
- * material, which `settleNotices` does; it is never dismissed.
+ * Two ways an instruction stops being one, and the difference is the kind of
+ * notice — which is why this cannot be swept with a single rule.
  *
- * Nor was the other reading of that clause reachable: nothing deletes a
- * request, and `field_notices.source_request_id` cascades, so a notice whose
- * request row had vanished would have been deleted with it.
+ * **The line is finished.** Nothing is left to issue, so no instruction on it
+ * can be acted on. True for every kind.
+ *
+ * **The request behind it is closed.** A CONFIRMED notice says "it is on
+ * order, stop looking" and a RETURNED one says "answer this before we
+ * decide" — both speak for a live request. Once that request is fulfilled or
+ * settled, they are talking about something that no longer exists.
+ *
+ * REJECTED is deliberately excluded from that second rule, and this is the
+ * case the whole function turns on. Rejecting a backorder deactivates the
+ * request *and* raises the notice telling the crew to go and find the material
+ * themselves — so "the request is not active" is true the instant the notice
+ * exists. Sweeping on it took the instruction off the card before anyone could
+ * act on it. A rejected notice is settled by locating the material, in
+ * `settleNotices`, and is never dismissed.
+ *
+ * Without the second rule, locating material that settled a partly-confirmed
+ * request left its CONFIRMED and RETURNED notices on the crew's card with no
+ * way to clear them: re-raising to answer the returned one is refused, because
+ * the request it belongs to still holds the quantity as pending.
  */
 export async function sweepStaleNotices(client, lineId) {
   const { rowCount } = await client.query(
     `UPDATE field_notices n
         SET status = 'Superseded', resolved_at = now(),
-            resolved_reason = 'No longer outstanding', updated_at = now()
+            resolved_reason = CASE
+              WHEN l.qty_remaining_requirement <= 0 THEN 'No longer outstanding'
+              ELSE 'The request behind it is closed'
+            END,
+            updated_at = now()
        FROM fmr_lines l
       WHERE n.fmr_line_id = l.id
         AND l.id = $1
         AND n.status = 'Active'
-        AND l.qty_remaining_requirement <= 0`,
+        AND (
+          l.qty_remaining_requirement <= 0
+          OR (
+            n.kind IN ('CONFIRMED', 'RETURNED')
+            AND n.source_request_id IS NOT NULL
+            AND NOT EXISTS (
+              SELECT 1 FROM backorder_requests b
+               WHERE b.id = n.source_request_id AND b.active
+            )
+          )
+        )`,
     [lineId]
   );
   return rowCount;
