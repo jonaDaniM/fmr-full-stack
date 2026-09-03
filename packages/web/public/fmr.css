@@ -874,6 +874,8 @@ button.issue:hover { filter: brightness(0.97); }
   background: var(--warn-soft); color: var(--warn);
 }
 .notice-rejected { background: var(--danger-soft); color: var(--danger); }
+/* Confirmed is the one notice that asks for nothing: it says stop looking. */
+.notice-ok { background: var(--ok-soft); color: var(--ok); }
 .notice b { font-weight: 700; }
 
 .bags { padding: var(--s-2) var(--s-4); border-top: 1px solid var(--rule); font-size: var(--t-sm); }

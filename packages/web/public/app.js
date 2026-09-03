@@ -15,6 +15,7 @@ import { dialog } from './lib/modal.js';
 import { toast, toastError, toastSticky } from './lib/toast.js';
 import { initShell, session } from './lib/shell.js';
 import { ceilingFor } from './lib/ceilings.js';
+import { noticeKind } from './lib/noticeKinds.js';
 
 // filters: what has been typed into each FMR's filter box, by fmrId. Kept
 // here rather than read off the DOM so a re-render does not lose it.
@@ -72,7 +73,34 @@ function availableActions(line) {
     actions.push('BACKORDER_REQUESTED');
   }
 
-  return actions;
+  // Drop anything that cannot move a single unit. The tests above ask whether
+  // there is material of the right kind; the ceiling asks whether any of it is
+  // free, and a pending backorder locks material without changing any of the
+  // quantities those tests read. A line whose whole outstanding quantity sits
+  // under one still offered Confirm found, Issue direct and Bag — each opening
+  // a box prefilled 0, refusing every number, with Cancel the only way out.
+  return actions.filter((action) => ceilingFor(line, action) > 0);
+}
+
+/**
+ * Why a line with material outstanding offers nothing to do.
+ *
+ * Almost always a pending backorder: the office has been asked and has not
+ * answered, and that quantity cannot be located, reserved or issued until they
+ * do. Saying so is the difference between a card that looks broken and one
+ * that explains itself.
+ */
+function nothingToDoBecause(line) {
+  const q = line.quantities;
+  if (q.remaining <= 0) return 'Nothing outstanding on this line.';
+  if (q.pendingBackorder > 0) {
+    return `Waiting on the office — ${n(q.pendingBackorder)} ${line.uom ?? ''} `
+      + 'is on a backorder nobody has decided yet.';
+  }
+  if (q.confirmedBackorder > 0) {
+    return `${n(q.confirmedBackorder)} ${line.uom ?? ''} is on order. Nothing to do here.`;
+  }
+  return 'Nothing can be moved on this line right now.';
 }
 
 const statusPill = (status) => {
@@ -88,12 +116,22 @@ function renderCard(line) {
   const q = line.quantities;
   const actions = availableActions(line);
 
+  // The server writes the sentence — `describeNotice` picks the wording for
+  // each decision, and the office's note is folded into `detail`. Read those
+  // rather than rebuilding them here.
+  //
+  // This branched on `notice.status`, which is the lifecycle (Active /
+  // Resolved / Superseded) and never the decision, so every live notice took
+  // the else. A rejection — the one notice that means "nobody is sourcing
+  // this, go and find it" — read to the crew as "Returned: 0", the opposite
+  // instruction against a quantity that does not exist: `qtyRequested` and
+  // `qtyPending` are fields of a backorder request, not of a notice.
   const notices = (line.notices ?? []).map((notice) => {
-    const rejected = notice.status === 'Rejected';
-    return `<div class="notice ${rejected ? 'notice-rejected' : ''}">
-      <b>${rejected ? 'Rejected' : 'Returned'}:</b>
-      ${n(rejected ? notice.qtyRequested : notice.qtyPending)} ${esc(line.uom ?? '')}
-      &mdash; ${esc(notice.adminNotes || notice.returnedReviewReason || 'see the office')}
+    const kind = noticeKind(notice.kind);
+    return `<div class="notice ${esc(kind.className)}">
+      <b>${esc(kind.label)}:</b>
+      ${n(notice.qtyOutstanding)} ${esc(line.uom ?? '')}
+      &mdash; ${esc(notice.detail || notice.adminNotes || 'see the office')}
     </div>`;
   }).join('');
 
@@ -135,7 +173,7 @@ function renderCard(line) {
       ${actions.map((action, i) =>
         `<button type="button" data-action="${action}"
                  class="btn ${i === 0 ? 'btn-primary' : ''}">${ACTION_LABELS[action]}</button>`
-      ).join('') || '<span class="dim">Nothing outstanding on this line.</span>'}
+      ).join('') || `<span class="dim">${esc(nothingToDoBecause(line))}</span>`}
       <button type="button" class="btn btn-quiet act-history"
               data-history="${esc(line.id)}">History</button>
     </div>
