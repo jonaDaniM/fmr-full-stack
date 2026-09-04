@@ -163,19 +163,34 @@ export async function createDraft(ctx, { header = {}, lines = [] } = {}) {
         )).rows[0]?.id ?? null
       : null;
 
-    const { rows: itemRows } = await client.query(
-      `INSERT INTO import_items
-         (batch_id, project_id, sheet_name, fmr_number, iwp_number, iso_number,
-          iso_sheet, requested_by, date_required, priority, header_json,
-          line_count, status, selected, existing_fmr_id)
-       VALUES ($1,$2,'Manual entry',$3,$4,$5,$6,$7,$8,$9,$10,$11,'Ready',true,$12)
-       RETURNING id`,
-      [
-        batchId, projectId, h.fmrNumber, h.iwpNumber, h.isoNumber, h.isoSheet,
-        h.requestedBy, h.dateRequired, h.priority,
-        { notes: h.notes }, normalizedLines.length, existing
-      ]
-    );
+    let itemRows;
+    try {
+      ({ rows: itemRows } = await client.query(
+        `INSERT INTO import_items
+           (batch_id, project_id, sheet_name, fmr_number, iwp_number, iso_number,
+            iso_sheet, requested_by, date_required, priority, header_json,
+            line_count, status, selected, existing_fmr_id)
+         VALUES ($1,$2,'Manual entry',$3,$4,$5,$6,$7,$8,$9,$10,$11,'Ready',true,$12)
+         RETURNING id`,
+        [
+          batchId, projectId, h.fmrNumber, h.iwpNumber, h.isoNumber, h.isoSheet,
+          h.requestedBy, h.dateRequired, h.priority,
+          { notes: h.notes }, normalizedLines.length, existing
+        ]
+      ));
+    } catch (error) {
+      // one_active_draft_per_number: another unpublished draft already
+      // holds this number. Say which, and what to do about it.
+      if (error.code === '23505') {
+        throw new LedgerError(
+          `${h.fmrNumber} already has a draft waiting. Publish or archive that `
+          + 'one first, or give this draft a different number.',
+          'NUMBER_IN_USE'
+        );
+      }
+      throw error;
+    }
+
     const itemId = itemRows[0].id;
 
     for (const line of normalizedLines) {
@@ -219,17 +234,32 @@ export async function updateDraftHeader(ctx, { itemId, patch = {} }) {
     const validation = validateDraft(merged);
     const h = validation.normalized.header;
 
-    await client.query(
-      `UPDATE import_items
-          SET fmr_number = $2, iwp_number = $3, iso_number = $4, iso_sheet = $5,
-              requested_by = $6, date_required = $7, priority = $8,
-              header_json = $9
-        WHERE id = $1`,
-      [
-        itemId, h.fmrNumber, h.iwpNumber, h.isoNumber, h.isoSheet,
-        h.requestedBy, h.dateRequired, h.priority, { notes: h.notes }
-      ]
-    );
+    try {
+      await client.query(
+        `UPDATE import_items
+            SET fmr_number = $2, iwp_number = $3, iso_number = $4, iso_sheet = $5,
+                requested_by = $6, date_required = $7, priority = $8,
+                header_json = $9
+          WHERE id = $1`,
+        [
+          itemId, h.fmrNumber, h.iwpNumber, h.isoNumber, h.isoSheet,
+          h.requestedBy, h.dateRequired, h.priority, { notes: h.notes }
+        ]
+      );
+    } catch (error) {
+      // one_active_draft_per_number. Numbering a draft is exactly when this
+      // collides, and the raw error reached the office as "something went
+      // wrong, try again" — advice that cannot work, so it was tried five
+      // times. Name the number and say what to do about it.
+      if (error.code === '23505') {
+        throw new LedgerError(
+          `${h.fmrNumber} already has a draft waiting. Publish or archive that `
+          + 'one first, or give this draft a different number.',
+          'NUMBER_IN_USE'
+        );
+      }
+      throw error;
+    }
 
     await recordIssues(client, item.batch_id, itemId, merged);
 
