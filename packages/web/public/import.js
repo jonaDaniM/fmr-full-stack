@@ -19,7 +19,7 @@ import { confirmAction } from './lib/modal.js';
 import { toast, toastError } from './lib/toast.js';
 import { initShell } from './lib/shell.js';
 
-const state = { batch: null, extraction: null, polling: null };
+const state = { batch: null, extraction: null, polling: null, removedEverything: false };
 
 // --- upload ----------------------------------------------------------------
 
@@ -310,6 +310,7 @@ function renderReading(fileCount, seconds) {
 // --- review ----------------------------------------------------------------
 
 async function loadBatch(batchId) {
+  state.removedEverything = false;
   state.batch = await api(`/api/import/${batchId}`);
   renderBatch();
 }
@@ -320,21 +321,21 @@ function renderBatch() {
   const selected = batch.items.filter((i) => i.selected).length;
 
   $('view').innerHTML = `
-    <div class="stats">
+    ${state.removedEverything ? '' : `<div class="stats">
       <div class="stat"><span class="n">${batch.summary.sheets}</span><span class="l">Sheets</span></div>
       <div class="stat"><span class="n">${batch.summary.lines}</span><span class="l">Lines</span></div>
       <div class="stat ${batch.summary.errors ? 'stat-danger' : ''}">
         <span class="n">${batch.summary.errors}</span><span class="l">Errors</span></div>
       <div class="stat ${batch.summary.warnings ? 'stat-warn' : ''}">
         <span class="n">${batch.summary.warnings}</span><span class="l">Warnings</span></div>
-    </div>
+    </div>`}
 
     ${state.extraction ? `<div class="extract-note">${esc(state.extraction)}</div>` : ''}
 
     <p class="source-line">
       <strong>${esc(batch.sourceName)}</strong> &middot; read with the
       "${esc(batch.profileName)}" profile
-      ${batch.summary.errors
+      ${batch.summary.errors && !state.removedEverything
         ? '&middot; errors must be fixed before publishing'
         : ''}
     </p>
@@ -343,8 +344,11 @@ function renderBatch() {
       ? batch.items.map(renderItem).join('')
       : `<div class="empty">
            <h2>Nothing to review</h2>
-           <p>No FMRs were found in that file. Check it is the right one, or that
-              the sheet names match what the profile expects.</p>
+           ${state.removedEverything
+             ? `<p>Every FMR in this batch was removed. Nothing was published, and
+                   the drawings are unchanged — read them again to start over.</p>`
+             : `<p>No FMRs were found in that file. Check it is the right one, or that
+                   the sheet names match what the profile expects.</p>`}
            <button type="button" class="btn btn-primary" id="again">Try another file</button>
          </div>`}
 
@@ -521,6 +525,9 @@ $('view').addEventListener('click', async (event) => {
       body: JSON.stringify({ itemId: dropItem })
     });
     state.batch.items = state.batch.items.filter((i) => i.id !== dropItem);
+    // An empty batch means one of two different things, and the message that
+    // blames the file is wrong when the office just emptied it by hand.
+    state.removedEverything = state.batch.items.length === 0;
     renderBatch();
   } catch (failure) {
     toastError(failure.message);
