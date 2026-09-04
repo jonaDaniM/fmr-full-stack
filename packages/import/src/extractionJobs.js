@@ -61,7 +61,27 @@ export async function runJob(ctx, jobId, files, { iwpNumber, sourceName }) {
     const { sheets, summary } = toDraftSheets(payload);
 
     if (!sheets.length) {
-      throw new LedgerError('No drawings were found in those files.', 'NO_DRAWINGS');
+      // The package was read; nothing in it was an isometric this can stage.
+      // Saying only "no drawings were found" of a file that plainly holds
+      // drawings reads as a broken parser, so say what it did find instead:
+      // a weld log and a cover sheet is a different problem from a scan that
+      // needs OCR, and only one of them is worth re-exporting.
+      const { quarantined, droppedRows, pdfsDiscovered } = summary;
+      const because = [
+        quarantined && `${quarantined} page${quarantined === 1 ? ' was' : 's were'} set aside `
+          + '(weld logs, covers, or scans with no text behind them)',
+        droppedRows && `${droppedRows} drawing${droppedRows === 1 ? '' : 's'} had no `
+          + 'readable drawing number'
+      ].filter(Boolean);
+
+      throw new LedgerError(
+        `No isometric drawings could be read from `
+        + `${pdfsDiscovered || 'those'} file${pdfsDiscovered === 1 ? '' : 's'}.`
+        + (because.length ? ` ${because.join(', and ')}.` : '')
+        + ' A package of weld logs or scanned sheets has nothing to stage —'
+        + ' check this is the drawing package, or upload the sheets on their own.',
+        'NO_DRAWINGS'
+      );
     }
 
     const result = await stageWorkbook(ctx, {

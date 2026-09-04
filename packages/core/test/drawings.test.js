@@ -219,3 +219,41 @@ test('nothing read is not the same as nothing saved', () => {
   assert.equal(summary.timeSaved.available, false);
   assert.equal(summary.timeSaved.seconds, null, 'not zero — unknown');
 });
+
+/**
+ * A package that yields nothing has to say what it did contain.
+ *
+ * The office uploaded a 51-page package where the first isometric is page 17
+ * — the pages before it are a cover, sixteen weld logs and six pipe-support
+ * sheets. That package reads fine. But a package that is *only* those pages
+ * failed with "No drawings were found in those files", of a file plainly full
+ * of drawings, and the conclusion drawn was that the parser was broken rather
+ * than that the wrong PDF had been picked.
+ */
+test('a package with nothing stageable says what it did hold', () => {
+  const { summary } = toDraftSheets({
+    drawings: [],
+    pdfsDiscovered: 1,
+    quarantine: [
+      { source_pdf: 'combined.pdf', reason_code: 'WELD_LOG', reason_detail: 'weld log' },
+      { source_pdf: 'combined.pdf', reason_code: 'COVER', reason_detail: 'cover sheet' }
+    ]
+  });
+
+  assert.equal(summary.sheets, 0);
+  assert.equal(summary.quarantined, 2,
+    'the set-aside pages are the only account of where the package went');
+});
+
+test('a drawing with no readable number is counted, not silently lost', () => {
+  const { sheets, summary } = toDraftSheets({
+    drawings: [
+      { drawingNumber: '', materials: [{ description: 'PIPE', quantity: '10' }] },
+      { drawingNumber: 'D-4410-01', materials: [{ description: 'PIPE', quantity: '10' }] }
+    ]
+  });
+
+  assert.equal(sheets.length, 1, 'the readable drawing still stages');
+  assert.equal(summary.droppedRows, 1, 'and the unreadable one is reported, not dropped quietly');
+  assert.match(describePackage(summary), /1 drawing skipped/);
+});
