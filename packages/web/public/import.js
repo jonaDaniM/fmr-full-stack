@@ -288,6 +288,8 @@ function renderItem(item) {
         &middot; ${item.lines.length} lines &middot; sheet "${esc(item.sheetName)}"</span>
       ${item.isDuplicate ? '<span class="pill pill-warn">Already exists</span>' : ''}
       ${item.status === 'Blocked' ? '<span class="pill pill-danger">Blocked</span>' : ''}
+      <button type="button" class="btn btn-quiet btn-sm drop-item"
+              data-drop-item="${esc(item.id)}">Remove</button>
     </div>
 
     ${item.issues.length ? `<div class="issues">
@@ -303,6 +305,7 @@ function renderItem(item) {
         <th class="w-tiny">#</th><th class="w-sm">Source row</th>
         <th class="w-md">Code</th><th class="w-sm">Size</th>
         <th class="w-grow">Description</th><th class="num w-sm">Qty</th><th class="w-sm">UOM</th>
+        <th class="w-tiny"><span class="sr-only">Remove</span></th>
       </tr></thead>
       <tbody>${item.lines.map((l) => `
         <tr data-line="${esc(l.id)}" ${rowIsFlagged(item, l) ? 'class="row-bad"' : ''}>
@@ -313,6 +316,9 @@ function renderItem(item) {
           <td contenteditable data-field="description">${esc(l.description ?? '')}</td>
           <td class="num" contenteditable data-field="quantity">${esc(editableNumber(l.quantity))}</td>
           <td class="mono" contenteditable data-field="uom">${esc(l.uom ?? '')}</td>
+          <td><button type="button" class="linkish drop-line"
+                      data-drop-line="${esc(l.id)}"
+                      aria-label="Remove line ${esc(l.lineNumber)}">&times;</button></td>
         </tr>`).join('')}
       </tbody>
     </table></div>
@@ -356,6 +362,77 @@ function updatePublishBar() {
   button.disabled = Boolean(batch.summary.errors) || !selected;
   button.textContent = `Publish ${selected} FMR${selected === 1 ? '' : 's'}`;
 }
+
+/**
+ * Remove a line, or a whole proposed FMR, before anything is published.
+ *
+ * A package holds every drawing a planner compiled, and the office is often
+ * only working part of it: pipe and field welds now, valves and gaskets when
+ * the crew comes back. Deselecting an FMR hides it from the publish button
+ * but leaves it in the queue; this takes it out.
+ */
+$('view').addEventListener('click', async (event) => {
+  const lineButton = event.target.closest('button[data-drop-line]');
+  const itemButton = event.target.closest('button[data-drop-item]');
+  if ((!lineButton && !itemButton) || !state.batch) return;
+
+  if (lineButton) {
+    const { dropLine } = lineButton.dataset;
+    const row = lineButton.closest('tr');
+    const description = row.querySelector('[data-field="description"]')?.textContent.trim();
+
+    const sure = await confirmAction({
+      title: 'Remove this line?',
+      lede: description || `Line ${row.firstElementChild.textContent.trim()}`,
+      body: 'It will not be published. The drawing is unchanged.',
+      confirmLabel: 'Remove line'
+    });
+    if (!sure) return;
+
+    try {
+      await api('/api/import/line', {
+        method: 'DELETE',
+        body: JSON.stringify({ lineId: dropLine })
+      });
+
+      for (const item of state.batch.items) {
+        const at = item.lines.findIndex((l) => l.id === dropLine);
+        if (at === -1) continue;
+        item.lines.splice(at, 1);
+        item.lines.forEach((line, index) => { line.lineNumber = index + 1; });
+      }
+      renderBatch();
+    } catch (failure) {
+      toastError(failure.message);
+    }
+    return;
+  }
+
+  const { dropItem } = itemButton.dataset;
+  const item = state.batch.items.find((i) => i.id === dropItem);
+  if (!item) return;
+
+  const sure = await confirmAction({
+    title: 'Remove this FMR?',
+    lede: item.fmrNumber ?? item.sheetName,
+    body: `All ${item.lines.length} lines go with it, and it will not be published. `
+      + 'The drawing is unchanged, so it can be read again later.',
+    confirmLabel: 'Remove FMR',
+    danger: true
+  });
+  if (!sure) return;
+
+  try {
+    await api('/api/import/item', {
+      method: 'DELETE',
+      body: JSON.stringify({ itemId: dropItem })
+    });
+    state.batch.items = state.batch.items.filter((i) => i.id !== dropItem);
+    renderBatch();
+  } catch (failure) {
+    toastError(failure.message);
+  }
+});
 
 /** Save a corrected cell when focus leaves it. */
 $('view').addEventListener('focusout', async (event) => {

@@ -22,7 +22,8 @@ import {
   getRegister, getIsoSummary, getLineHistory, getDashboard, getActiveBagQueue
 } from '../../core/src/services/reporting.js';
 import {
-  stageWorkbook, getBatch, correctLine, publishBatch
+  stageWorkbook, getBatch, correctLine, publishBatch,
+  removeStagedLine, removeStagedItem
 } from '../../import/src/staging.js';
 import { outstandingNotices } from '../../core/src/services/notices.js';
 import {
@@ -645,6 +646,24 @@ route('POST', /^\/api\/import\/line$/, async (req, res) => {
 
   const body = await readBody(req);
   json(res, 200, { line: await correctLine(ctx, body) });
+});
+
+route('DELETE', /^\/api\/import\/line$/, async (req, res) => {
+  const ctx = await authenticate(req);
+  requirePermission(ctx, 'ownerEdit');
+
+  const body = await readBody(req);
+  json(res, 200, await removeStagedLine(ctx, body));
+});
+
+// A planner often works part of a package. Removing one proposed FMR is not
+// the same as deselecting it: deselecting leaves it in the queue.
+route('DELETE', /^\/api\/import\/item$/, async (req, res) => {
+  const ctx = await authenticate(req);
+  requirePermission(ctx, 'ownerEdit');
+
+  const body = await readBody(req);
+  json(res, 200, await removeStagedItem(ctx, body));
 });
 
 route('POST', /^\/api\/import\/publish$/, async (req, res) => {

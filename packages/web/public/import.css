@@ -38,3 +38,32 @@
   background: var(--accent-soft); color: var(--ink);
   border: 1px solid var(--accent-line); border-radius: var(--r-md);
 }
+
+/*
+ * Removing a line, or a whole proposed FMR, before publishing.
+ *
+ * Both are quiet by default: the common act on this screen is correcting a
+ * cell, not deleting, and a row of loud red crosses reads as a list of
+ * problems. They come forward on hover and on keyboard focus.
+ */
+.drop-line {
+  font: inherit; font-size: var(--t-md); line-height: 1;
+  color: var(--muted); background: none; border: 0;
+  padding: 0 var(--s-2); cursor: pointer; border-radius: var(--r-sm);
+}
+.drop-line:hover, .drop-line:focus-visible { color: var(--danger); }
+
+.item-head .drop-item {
+  margin-left: auto;   /* against the right edge, away from the checkbox */
+  flex: 0 0 auto;
+}
+.item-head .drop-item:hover { color: var(--danger); border-color: var(--danger); }
+
+.btn-sm { padding: var(--s-1) var(--s-3); font-size: var(--t-xs); }
+
+/* Visible to a screen reader, not on screen: the remove column's heading. */
+.sr-only {
+  position: absolute; width: 1px; height: 1px;
+  padding: 0; margin: -1px; overflow: hidden;
+  clip-path: inset(50%); white-space: nowrap;
+}

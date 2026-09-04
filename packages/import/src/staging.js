@@ -397,3 +397,119 @@ function parseDate(value) {
   const parsed = new Date(value);
   return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString().slice(0, 10);
 }
+
+/**
+ * Drop a line from a staged FMR before it is published.
+ *
+ * The extractor reads what is on the drawing, and what is on the drawing is
+ * not always what this requisition is for: crews install the pipe and field
+ * welds first and come back for valves, bolts and gaskets months later. The
+ * office needs to publish the part being worked now and leave the rest.
+ *
+ * Only unpublished batches, and never the last line — an FMR with no material
+ * is not something a crew can be sent to find.
+ */
+export async function removeStagedLine(ctx, { lineId }) {
+  return withTransaction(async (client) => {
+    const { rows: found } = await client.query(
+      `SELECT l.id, l.item_id, i.fmr_number
+         FROM import_lines l
+         JOIN import_items i ON i.id = l.item_id
+         JOIN import_batches b ON b.id = i.batch_id
+        WHERE l.id = $1 AND b.project_id = $2 AND b.published_at IS NULL
+        FOR UPDATE OF l`,
+      [lineId, ctx.projectId]
+    );
+
+    const line = found[0];
+    if (!line) {
+      throw new LedgerError('That line is not in an unpublished batch.', 'NOT_FOUND');
+    }
+
+    const { rows: counted } = await client.query(
+      'SELECT count(*)::int AS n FROM import_lines WHERE item_id = $1',
+      [line.item_id]
+    );
+    if (counted[0].n <= 1) {
+      throw new LedgerError(
+        'That is the last line on this FMR. Remove the whole FMR instead.',
+        'LAST_LINE'
+      );
+    }
+
+    await client.query('DELETE FROM import_lines WHERE id = $1', [lineId]);
+
+    // Line numbers are what the office reads back to the field, so close the
+    // gap rather than leaving the list numbered 1, 2, 4.
+    await client.query(
+      `WITH renumbered AS (
+         SELECT id, row_number() OVER (ORDER BY line_number) AS n
+           FROM import_lines WHERE item_id = $1
+       )
+       UPDATE import_lines l SET line_number = r.n
+         FROM renumbered r WHERE r.id = l.id`,
+      [line.item_id]
+    );
+
+    await client.query(
+      `UPDATE import_items SET line_count = (
+         SELECT count(*) FROM import_lines WHERE item_id = $1
+       ) WHERE id = $1`,
+      [line.item_id]
+    );
+
+    await client.query(
+      `INSERT INTO audit_log
+         (project_id, entity_type, entity_id, action, payload, user_id,
+          user_email, source_interface)
+       VALUES ($1,'DRAFT',$2,'STAGED_LINE_REMOVED',$3,$4,$5,'IMPORT')`,
+      [ctx.projectId, line.item_id, { lineId, fmrNumber: line.fmr_number },
+       ctx.user.id, ctx.user.email]
+    );
+
+    return { ok: true, itemId: line.item_id, remaining: counted[0].n - 1 };
+  });
+}
+
+/**
+ * Drop a whole staged FMR before it is published.
+ *
+ * A package holds every drawing a planner compiled, and they are often only
+ * working part of it. Deselecting hides an FMR from the publish button but
+ * leaves it in the queue; this removes it.
+ */
+export async function removeStagedItem(ctx, { itemId }) {
+  return withTransaction(async (client) => {
+    const { rows } = await client.query(
+      `SELECT i.id, i.fmr_number, i.batch_id
+         FROM import_items i
+         JOIN import_batches b ON b.id = i.batch_id
+        WHERE i.id = $1 AND b.project_id = $2
+          AND b.published_at IS NULL AND i.published_fmr_id IS NULL
+        FOR UPDATE OF i`,
+      [itemId, ctx.projectId]
+    );
+
+    const item = rows[0];
+    if (!item) {
+      throw new LedgerError(
+        'That FMR is not in an unpublished batch, or has already been published.',
+        'NOT_FOUND'
+      );
+    }
+
+    await client.query(
+      `INSERT INTO audit_log
+         (project_id, entity_type, entity_id, action, payload, user_id,
+          user_email, source_interface)
+       VALUES ($1,'DRAFT',$2,'STAGED_FMR_REMOVED',$3,$4,$5,'IMPORT')`,
+      [ctx.projectId, itemId, { fmrNumber: item.fmr_number },
+       ctx.user.id, ctx.user.email]
+    );
+
+    // import_lines and import_issues cascade from the item.
+    await client.query('DELETE FROM import_items WHERE id = $1', [itemId]);
+
+    return { ok: true, fmrNumber: item.fmr_number };
+  });
+}
