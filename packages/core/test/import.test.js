@@ -15,6 +15,7 @@ import {
 import {
   findLabeledValue, findTableHeader, extractSheet, SEVERITY
 } from '../../import/src/extract.js';
+import { readWorkbook, readXlsx } from '../../import/src/workbook.js';
 import { readFileSync } from 'node:fs';
 
 const profile = JSON.parse(
@@ -190,4 +191,39 @@ test('a missing required header is reported', () => {
   ];
   const { issues } = extractSheet(grid, profile, 'S');
   assert.ok(issues.some((i) => i.code === 'MISSING_HEADER' && i.field === 'fmrNumber'));
+});
+
+/**
+ * A file the server cannot read is an answer, not a crash.
+ *
+ * Both of these reached the office as "Something went wrong. Try again." —
+ * which reads as a broken server and invites exactly the retry that cannot
+ * work. The API now answers WorkbookError with 422 and the message verbatim,
+ * so the message itself has to be worth reading at a warehouse desk.
+ */
+test('a file that is not a workbook says what to supply instead', () => {
+  const failure = (() => {
+    try { readWorkbook(Buffer.from('nonsense'), 'photo.png'); return null; }
+    catch (error) { return error; }
+  })();
+
+  assert.ok(failure, 'an unreadable file was accepted');
+  assert.equal(failure.name, 'WorkbookError');
+  assert.match(failure.message, /\.xlsx or \.csv/,
+    'the message has to name what would work');
+});
+
+test('the xlsx message tells the office what to do, not where the code lives', () => {
+  // No parser is configured in the test process, which is the deployed state.
+  const failure = (() => {
+    try { readXlsx(Buffer.from('PK')); return null; }
+    catch (error) { return error; }
+  })();
+
+  assert.ok(failure);
+  assert.equal(failure.name, 'WorkbookError');
+  assert.match(failure.message, /save the sheet as csv/i,
+    'a person at a desk needs the workaround, not a file path');
+  assert.doesNotMatch(failure.message, /packages\/|setXlsxParser/,
+    'source paths and function names are for the log, not the screen');
 });

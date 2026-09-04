@@ -73,9 +73,11 @@ export function readCsv(text, name = 'Sheet1') {
  */
 export function readXlsx(buffer) {
   if (!xlsxParser) {
+    // This reaches an office screen, so it says what to do about it rather
+    // than naming source files. Whoever deploys the server reads the log.
     throw new WorkbookError(
-      'No XLSX parser configured. Install one (see packages/import/src/workbook.js) ' +
-      'and call setXlsxParser(), or supply the file as CSV.'
+      'This server cannot read .xlsx files. Save the sheet as CSV and upload '
+      + 'that, or ask whoever set the system up to add a spreadsheet reader.'
     );
   }
 

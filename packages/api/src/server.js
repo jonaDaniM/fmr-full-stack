@@ -44,7 +44,7 @@ import {
   listValues, saveListValue, setListValueActive, renumberFmr
 } from '../../core/src/services/admin.js';
 import { getBootstrap } from '../../core/src/services/bootstrap.js';
-import { readWorkbook } from '../../import/src/workbook.js';
+import { readWorkbook, WorkbookError } from '../../import/src/workbook.js';
 import { groupExtractedRows, describeExtraction } from '../../import/src/extracted.js';
 import {
   startJob, runJob, getJob, failAbandonedJobs
@@ -1002,6 +1002,13 @@ const server = http.createServer(async (req, res) => {
     if (error instanceof LedgerError) {
       // A rule was broken — the crew needs to know which, in their words.
       return json(res, 422, { error: error.message, code: error.code });
+    }
+
+    // "Supply a .xlsx or .csv file" is an answer, not a crash, and it reached
+    // the office as "Something went wrong. Try again." — which reads as a
+    // broken server and invites the retry that cannot work.
+    if (error instanceof WorkbookError) {
+      return json(res, 422, { error: error.message, code: 'BAD_WORKBOOK' });
     }
 
     // Message and stack, not the error object: a pg error carries the failing
