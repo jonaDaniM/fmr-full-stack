@@ -11,7 +11,9 @@
  * point of this screen.
  */
 
-import { api, upload as uploadWithProgress, idempotencyKey } from './lib/api.js';
+import {
+  api, upload as uploadWithProgress, idempotencyKey, getProjectId
+} from './lib/api.js';
 import { $, esc, editableNumber } from './lib/dom.js';
 import { confirmAction } from './lib/modal.js';
 import { toast, toastError } from './lib/toast.js';
@@ -33,7 +35,23 @@ function renderDrop(message = null) {
     </div>
     <p class="hint">Drop a whole IWP package of drawings at once — the material
        on each one becomes an FMR to check. Workbooks are read one sheet per
-       FMR, and an extraction CSV one drawing per FMR.</p>`;
+       FMR, and an extraction CSV one drawing per FMR.</p>
+
+    <div class="takeoff-offer">
+      <h3>Or take material off for ordering</h3>
+      <p>A Material Takeoff is what the material team quotes and buys from,
+         before any FMR exists. Same drawings, read for what to order rather
+         than what to fetch — pipe by the foot, bolts and gaskets listed apart
+         so they can be quoted separately.</p>
+      <div class="takeoff-fields">
+        <label for="mtoCwa">CWA <span class="dim">(optional)</span></label>
+        <input id="mtoCwa" type="text" placeholder="10D" autocomplete="off">
+        <label for="mtoIwp">IWP <span class="dim">(if the cover page has none)</span></label>
+        <input id="mtoIwp" type="text" placeholder="IP-SMM30R107MMPP-K447" autocomplete="off">
+      </div>
+      <input id="mtoFile" type="file" accept=".pdf" multiple>
+      <label for="mtoFile" class="btn">Choose drawings for a takeoff</label>
+    </div>`;
 
   const drop = $('drop');
   const file = $('file');
@@ -48,6 +66,8 @@ function renderDrop(message = null) {
   }
 
   drop.addEventListener('drop', (e) => send([...(e.dataTransfer?.files ?? [])]));
+
+  $('mtoFile').onchange = (event) => sendTakeoff([...event.target.files]);
 }
 
 /**
@@ -125,6 +145,79 @@ async function sendDrawings(files) {
   } catch (failure) {
     renderDrop(failure.message);
   }
+}
+
+/**
+ * Read a package for ordering rather than for requisitioning.
+ *
+ * Nothing is staged and nothing is published — the answer is the takeoff
+ * file, which goes to whoever quotes the material. So this does not poll a
+ * job: it asks, waits, and hands back a download.
+ */
+async function sendTakeoff(files) {
+  const pdfs = files.filter((file) => /\.pdf$/i.test(file.name));
+  if (!pdfs.length) {
+    return renderDrop('A takeoff is read from drawing PDFs. Choose the ISO sheets.');
+  }
+
+  const cwa = $('mtoCwa')?.value.trim() ?? '';
+  const iwp = $('mtoIwp')?.value.trim() ?? '';
+
+  renderUploading(
+    `${pdfs.length} drawing${pdfs.length === 1 ? '' : 's'}`,
+    'Reading the drawings for a takeoff…'
+  );
+
+  const loaded = await Promise.all(
+    pdfs.map(async (file) => ({ name: file.name, buffer: await file.arrayBuffer() }))
+  );
+
+  const query = new URLSearchParams();
+  if (cwa) query.set('cwa', cwa);
+  if (iwp) query.set('iwp', iwp);
+
+  try {
+    const response = await fetch(`/api/import/takeoff?${query}`, {
+      method: 'POST',
+      headers: { 'x-project-id': getProjectId() },
+      body: frameFiles(loaded)
+    });
+
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({}));
+      throw new Error(body.error || 'Those drawings could not be read.');
+    }
+
+    const rows = response.headers.get('x-takeoff-rows');
+    const drawings = response.headers.get('x-takeoff-drawings');
+    const name = /filename="([^"]+)"/.exec(
+      response.headers.get('content-disposition') ?? ''
+    )?.[1] ?? 'takeoff.csv';
+
+    saveFile(await response.blob(), name);
+
+    renderDrop();
+    toast(`Took off ${rows} lines from ${drawings} drawings — ${name}`);
+  } catch (failure) {
+    renderDrop(failure.message);
+  }
+}
+
+/**
+ * Hand a generated file to whoever asked for it.
+ *
+ * The one place this app produces a download rather than a screen, so the
+ * object URL is revoked here instead of leaking for the life of the tab.
+ */
+function saveFile(blob, filename) {
+  const href = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = href;
+  link.download = filename;
+  document.body.append(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(href);
 }
 
 /** A workbook or a CSV: read inside the request, as it always was. */

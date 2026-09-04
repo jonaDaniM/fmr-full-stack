@@ -79,10 +79,14 @@ async function writePackage(dir, files) {
  * stdout carries JSON and nothing else; anything the parser wants to say goes
  * to stderr, which is kept for the failure message and otherwise ignored.
  */
-function runExtractor(dir, iwpNumber) {
+function runExtractor(dir, iwpNumber, { takeoff = false, cwa = null } = {}) {
   return new Promise((resolve, reject) => {
-    const args = ['-m', 'iso_bom.fmr_json', '--input', dir];
+    // Same scan either way. fmr_json answers "what should the warehouse
+    // fetch"; mto_json answers "what should the material team buy".
+    const module = takeoff ? 'iso_bom.mto_json' : 'iso_bom.fmr_json';
+    const args = ['-m', module, '--input', dir];
     if (iwpNumber) args.push('--iwp-number', iwpNumber);
+    if (takeoff && cwa) args.push('--cwa', cwa);
 
     const child = spawn(python(), args, {
       cwd: extractorHome(),
@@ -174,13 +178,13 @@ function runExtractor(dir, iwpNumber) {
  * @param {{ iwpNumber?: string }} options
  * @returns {Promise<object>} the payload `toDraftSheets` expects
  */
-export async function extractDrawings(files, { iwpNumber } = {}) {
+export async function extractDrawings(files, { iwpNumber, takeoff = false, cwa = null } = {}) {
   if (!files?.length) throw new LedgerError('No drawings were uploaded.', 'NO_FILE');
 
   const dir = await mkdtemp(join(tmpdir(), 'fmr-drawings-'));
   try {
     await writePackage(dir, files);
-    return await runExtractor(dir, iwpNumber);
+    return await runExtractor(dir, iwpNumber, { takeoff, cwa });
   } finally {
     // The uploads are somebody's project documents; they do not outlive the
     // read on any path, including a timeout or a crash in the parser.

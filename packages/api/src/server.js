@@ -46,6 +46,8 @@ import {
 import { getBootstrap } from '../../core/src/services/bootstrap.js';
 import { readWorkbook, WorkbookError } from '../../import/src/workbook.js';
 import { groupExtractedRows, describeExtraction } from '../../import/src/extracted.js';
+import { extractDrawings } from '../../import/src/runner.js';
+import { takeoffDocument, takeoffFilename } from '../../import/src/mto.js';
 import {
   startJob, runJob, getJob, failAbandonedJobs
 } from '../../import/src/extractionJobs.js';
@@ -617,6 +619,93 @@ route('POST', /^\/api\/import\/drawings$/, async (req, res, { url }) => {
   runJob(ctx, jobId, files, { iwpNumber, sourceName });
 
   json(res, 202, { jobId, fileCount: files.length });
+});
+
+/**
+ * Record that material was taken off for quoting.
+ *
+ * Nothing is staged, so there is no entity to hang this on — but "who took
+ * this off, and when" is the question asked six weeks later when an order
+ * does not match the package, and the answer has to exist somewhere.
+ */
+async function auditTakeoff(ctx, takeoff, filename) {
+  const client = await pool.connect();
+  try {
+    await client.query(
+      `INSERT INTO audit_log
+         (project_id, entity_type, entity_id, action, payload, user_id,
+          user_email, source_interface)
+       VALUES ($1,'TAKEOFF',$2,'TAKEOFF_GENERATED',$3,$4,$5,'IMPORT')`,
+      [
+        ctx.projectId,
+        // entity_id is NOT NULL and nothing was staged, so the package this
+        // came off is the thing being recorded.
+        takeoff.iwpNumber || filename,
+        {
+          filename,
+          iwpNumber: takeoff.iwpNumber || null,
+          cwa: takeoff.cwa || null,
+          drawings: takeoff.drawings,
+          rows: takeoff.rows.length,
+          missingPipeSpec: takeoff.missingPipeSpec
+        },
+        ctx.user.id, ctx.user.email
+      ]
+    );
+  } finally {
+    client.release();
+  }
+}
+
+/**
+ * Read a package and answer with its Material Takeoff.
+ *
+ * The first document of a project, and the one the material team buys from:
+ * planners get the drawings, an MTO goes out to be quoted, material is
+ * ordered, and only then is there anything for an FMR to requisition.
+ *
+ * Synchronous, unlike the FMR import. Nothing is staged and nothing is
+ * written — the answer is a file, so there is no job to poll.
+ */
+route('POST', /^\/api\/import\/takeoff$/, async (req, res, { url }) => {
+  const ctx = await authenticate(req);
+  requirePermission(ctx, 'ownerEdit');
+
+  const chunks = [];
+  let size = 0;
+  for await (const chunk of req) {
+    size += chunk.length;
+    if (size > 100_000_000) {
+      throw new LedgerError('That package is too large.', 'TOO_LARGE');
+    }
+    chunks.push(chunk);
+  }
+  if (!size) throw new LedgerError('No drawings were uploaded.', 'NO_FILE');
+
+  const files = unframeFiles(Buffer.concat(chunks));
+  if (!files.length) throw new LedgerError('No drawings were uploaded.', 'NO_FILE');
+
+  const takeoff = await extractDrawings(files, {
+    iwpNumber: (url.searchParams.get('iwp') ?? '').trim() || undefined,
+    cwa: (url.searchParams.get('cwa') ?? '').trim() || null,
+    takeoff: true
+  });
+
+  const document = takeoffDocument(takeoff);
+  const filename = takeoffFilename(takeoff);
+
+  // Reading a package is not a change to anything, but who took material off
+  // for quoting is worth knowing when the order is questioned later.
+  await auditTakeoff(ctx, takeoff, filename);
+
+  res.writeHead(200, {
+    'content-type': 'text/csv; charset=utf-8',
+    'content-disposition': `attachment; filename="${filename}"`,
+    'content-length': Buffer.byteLength(document),
+    'x-takeoff-rows': String(takeoff.rows.length),
+    'x-takeoff-drawings': String(takeoff.drawings)
+  });
+  res.end(document);
 });
 
 /** How a package being read is getting on. */

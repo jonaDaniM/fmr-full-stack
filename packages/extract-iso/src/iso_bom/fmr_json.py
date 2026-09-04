@@ -34,6 +34,7 @@ os.environ.setdefault("PYMUPDF_MESSAGE", "fd:2")
 
 from .fmr_model import material_review_reasons  # noqa: E402
 from .fmr_pipeline import _scan_pdfs, discover_pdfs  # noqa: E402
+from .mto import cwa as _cwa, pipe_schedule as _pipe_schedule  # noqa: E402
 
 
 def _material(row) -> Dict[str, object]:
@@ -50,10 +51,13 @@ def _material(row) -> Dict[str, object]:
     }
 
 
-def _drawing(page) -> Dict[str, object]:
+def _drawing(page, schedule: str = "") -> Dict[str, object]:
     return {
         "drawingNumber": page.drawing_number,
         "revision": page.revision,
+        # Printed on the drawing, and what the buyer orders wall thickness
+        # against. The FMR side ignores it; a Material Takeoff cannot.
+        "pipeSchedule": schedule,
         "page": page.page,
         "sourcePdf": page.source_pdf,
         "sourcePath": page.source_path,
@@ -92,16 +96,65 @@ def scan(input_dir: Path, iwp_override: Optional[str] = None) -> Dict[str, objec
         iwp_number = unique_iwps[0] if len(unique_iwps) == 1 else ""
         conflict = len(unique_iwps) > 1
 
+    # The pipe schedule and CWA are printed on the page but are not part of
+    # the BOM, so the FMR scan does not carry them. A Material Takeoff needs
+    # both, and re-opening the PDFs to read two fields is cheaper than making
+    # every FMR import pay for them.
+    schedules, cwa_number = _takeoff_fields(input_dir, iso_pages)
+
     return {
-        "schemaVersion": "1.0",
+        "schemaVersion": "1.1",
         "iwpNumber": iwp_number,
         "iwpCandidates": unique_iwps,
         "iwpConflict": conflict,
+        "cwa": cwa_number,
         "counts": counts,
         "pdfsDiscovered": len(pdfs),
-        "drawings": [_drawing(page) for page in iso_pages],
+        "drawings": [
+            _drawing(page, schedules.get((page.source_path, page.page), ""))
+            for page in iso_pages
+        ],
         "quarantine": [entry.dict() for entry in quarantine],
     }
+
+
+def _takeoff_fields(input_dir: Path, iso_pages) -> tuple:
+    """Read the pipe schedule off each drawing, and the CWA off a cover page.
+
+    Neither is BOM data, so neither is on the page objects the scan returns.
+    Opening each PDF once and reading the pages already identified is quick;
+    a failure here is not worth losing a package over, so it degrades to
+    blanks and the caller can fill them in.
+    """
+    import fitz  # noqa: PLC0415 — kept local so an FMR-only import never loads it
+
+    wanted: Dict[str, List] = {}
+    for page in iso_pages:
+        wanted.setdefault(page.source_path, []).append(page)
+
+    schedules: Dict[tuple, str] = {}
+    cwa_number = ""
+
+    for source_path, pages in wanted.items():
+        full = input_dir / source_path
+        if not full.is_file():
+            continue
+        try:
+            with fitz.open(full) as document:
+                for page in pages:
+                    index = page.page - 1
+                    if 0 <= index < document.page_count:
+                        schedules[(page.source_path, page.page)] = _pipe_schedule(
+                            document[index]
+                        )
+                # A package names its CWA on the cover, which is page one.
+                if not cwa_number and document.page_count:
+                    cwa_number = _cwa(document[0])
+        except Exception as failure:  # noqa: BLE001 — a blank is recoverable
+            print(f"could not read takeoff fields from {source_path}: {failure}",
+                  file=sys.stderr)
+
+    return schedules, cwa_number
 
 
 def build_parser() -> argparse.ArgumentParser:

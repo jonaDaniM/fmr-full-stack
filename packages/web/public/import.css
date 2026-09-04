@@ -67,3 +67,55 @@
   padding: 0; margin: -1px; overflow: hidden;
   clip-path: inset(50%); white-space: nowrap;
 }
+
+/*
+ * Taking material off for ordering.
+ *
+ * A quieter offer than the drop zone above it: staging drawings for FMRs is
+ * the daily act on this screen, and a takeoff happens once at the start of a
+ * package. So it reads as a second option rather than competing for the eye —
+ * a plain card, not a second dashed target.
+ */
+.takeoff-offer {
+  margin-top: var(--s-5); padding: var(--s-4) var(--s-5);
+  background: var(--card);
+  border: 1px solid var(--rule); border-radius: var(--r-lg);
+}
+.takeoff-offer h3 {
+  font-family: var(--font-display); font-size: var(--t-md);
+  margin-bottom: var(--s-2);
+}
+.takeoff-offer p {
+  color: var(--muted); font-size: var(--t-sm);
+  max-width: 62ch; margin-bottom: var(--s-4);
+}
+
+/* CWA and IWP: short identifiers, so short fields, side by side until they
+   cannot be. */
+.takeoff-fields {
+  display: flex; flex-wrap: wrap; align-items: center;
+  gap: var(--s-2) var(--s-3); margin-bottom: var(--s-4);
+}
+.takeoff-fields label { font-size: var(--t-sm); font-weight: 600; }
+.takeoff-fields input {
+  width: 22ch; padding: var(--s-2) var(--s-3);
+  font: inherit; font-size: var(--t-sm);
+  color: var(--ink); background: var(--ground);
+  border: 1px solid var(--rule-2); border-radius: var(--r-sm);
+}
+.takeoff-fields input:focus-visible {
+  outline: 2px solid var(--accent); outline-offset: 1px;
+}
+
+/* The same hidden-input-with-a-label trick the drop zone uses, which is
+   scoped to .drop and so has to be repeated here. */
+.takeoff-offer input[type='file'] {
+  position: absolute; opacity: 0; width: 1px; height: 1px;
+}
+.takeoff-offer input[type='file']:focus-visible + label {
+  outline: 2px solid var(--accent); outline-offset: 2px;
+}
+
+@media (max-width: 520px) {
+  .takeoff-fields input { width: 100%; }
+}
