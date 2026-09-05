@@ -68,7 +68,8 @@ export async function connect() {
     reporting: await import('../../src/services/reporting.js'),
     drafts: await import('../../../import/src/drafts.js'),
     workflow: await import('../../../import/src/workflow.js'),
-    staging: await import('../../../import/src/staging.js')
+    staging: await import('../../../import/src/staging.js'),
+    swaps: await import('../../src/services/swaps.js')
   };
   return services;
 }
@@ -82,7 +83,8 @@ export async function fixture({ requested = 100 } = {}) {
   await pool.query(`TRUNCATE projects, users, fmr_headers, fmr_lines, bag_tags,
     bag_tag_items, backorder_requests, material_transactions, audit_log,
     field_notices, corrections, project_members, project_controls,
-    import_batches, import_items, import_lines, import_issues CASCADE`);
+    import_batches, import_items, import_lines, import_issues,
+    line_swaps, line_swap_repayments CASCADE`);
 
   const projectId = (await pool.query(
     `INSERT INTO projects (code,name) VALUES ('P1','Test Project') RETURNING id`)).rows[0].id;

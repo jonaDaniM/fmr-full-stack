@@ -15,6 +15,9 @@ import { pool } from '../../core/src/db/pool.js';
 import { LedgerError } from '../../core/src/domain/ledger.js';
 import { performFieldAction } from '../../core/src/services/field.js';
 import {
+  findDonors, borrowMaterial, repaySwap, openSwaps, swapsForLine
+} from '../../core/src/services/swaps.js';
+import {
   getBackorderQueue, decideBackorder
 } from '../../core/src/services/backorderReview.js';
 import { searchLines, getFmrDetail } from '../../core/src/services/search.js';
@@ -427,6 +430,69 @@ route('GET', /^\/api\/active-bags$/, async (req, res, { url }) => {
     sortOrder: url.searchParams.get('sort') || undefined,
     page: Number(url.searchParams.get('page')) || 1,
     pageSize: Number(url.searchParams.get('pageSize')) || 25
+  }), res);
+});
+
+/**
+ * Line swap.
+ *
+ * Borrowing is field work — a foreman standing at a rack decides it. Chasing
+ * what is still owed is office work, so it shares the backorder permission:
+ * a backorder is material the office owes the field, an open swap is material
+ * one line owes another, and the same person follows both up.
+ */
+
+route('GET', /^\/api\/lines\/([0-9a-f-]{36})\/donors$/, async (req, res, { match }) => {
+  const ctx = await authenticate(req);
+  requirePermission(ctx, 'fieldTransact');
+  await withClient(ctx, (c) => findDonors(c, ctx, { lineId: match[1] }), res);
+});
+
+route('POST', /^\/api\/swaps$/, async (req, res) => {
+  const ctx = await authenticate(req);
+  requirePermission(ctx, 'fieldTransact');
+
+  const body = await readBody(req);
+  const result = await once(
+    req.headers['idempotency-key'],
+    ctx.user,
+    body,
+    () => borrowMaterial(ctx, body)
+  );
+
+  json(res, 200, result);
+});
+
+route('GET', /^\/api\/swaps$/, async (req, res, { url }) => {
+  const ctx = await authenticate(req);
+  requirePermission(ctx, 'adminBackorder');
+  await withClient(ctx, async (c) => ({
+    swaps: await openSwaps(c, ctx, {
+      includeSettled: url.searchParams.get('all') === '1'
+    })
+  }), res);
+});
+
+route('POST', /^\/api\/swaps\/([0-9a-f-]{36})\/repay$/, async (req, res, { match }) => {
+  const ctx = await authenticate(req);
+  requirePermission(ctx, 'adminBackorder');
+
+  const body = await readBody(req);
+  const result = await once(
+    req.headers['idempotency-key'],
+    ctx.user,
+    { ...body, swapId: match[1] },
+    () => repaySwap(ctx, { ...body, swapId: match[1] })
+  );
+
+  json(res, 200, result);
+});
+
+route('GET', /^\/api\/lines\/([0-9a-f-]{36})\/swaps$/, async (req, res, { match }) => {
+  const ctx = await authenticate(req);
+  requirePermission(ctx, 'search');
+  await withClient(ctx, async (c) => ({
+    swaps: await swapsForLine(c, ctx, match[1])
   }), res);
 });
 

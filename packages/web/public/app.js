@@ -174,6 +174,9 @@ function renderCard(line) {
         `<button type="button" data-action="${action}"
                  class="btn ${i === 0 ? 'btn-primary' : ''}">${ACTION_LABELS[action]}</button>`
       ).join('') || `<span class="dim">${esc(nothingToDoBecause(line))}</span>`}
+      ${q.remaining > q.available + q.bagged ? `
+        <button type="button" class="btn btn-quiet act-borrow"
+                data-borrow="${esc(line.id)}">Borrow from another line</button>` : ''}
       <button type="button" class="btn btn-quiet act-history"
               data-history="${esc(line.id)}">History</button>
     </div>
@@ -506,9 +509,89 @@ $('results').addEventListener('input', (event) => {
   renderOneGroup(fmrId);
 });
 
+
+/**
+ * Borrow material from another line.
+ *
+ * The crew is standing at a rack with material that belongs to a different
+ * drawing. This makes that a recorded movement instead of a note in somebody's
+ * phone: the receiving line gets credit, and the donor stays visibly owed.
+ *
+ * Only lines with the same commodity code, size and unit are offered, and only
+ * what is actually on their shelf — bagged material belongs to another crew.
+ */
+async function borrowFrom(lineId) {
+  const line = state.results.find((l) => l.id === lineId);
+  if (!line) return;
+
+  const { donors, reason } = await api(`/api/lines/${encodeURIComponent(lineId)}/donors`);
+
+  if (reason === 'NO_COMMODITY_CODE') {
+    return toastError(
+      'This line has no commodity code, so matching material cannot be found '
+      + 'automatically. Ask the office to add one.'
+    );
+  }
+  if (!donors.length) {
+    return toastError('No other line is holding this material on the shelf.');
+  }
+
+  const short = Math.max(
+    0, line.quantities.remaining - line.quantities.available - line.quantities.bagged
+  );
+
+  await dialog({
+    title: 'Borrow from another line',
+    confirmLabel: 'Borrow it',
+    fields: [
+      {
+        name: 'donorLineId', label: 'Take it from', type: 'select', required: true,
+        options: donors.map((d) => ({
+          value: d.lineId,
+          label: `${d.fmrNumber} line ${d.lineNumber} — ${d.lendable} ${d.uom ?? ''} `
+               + `on the shelf (${d.isoNumber ?? ''})`
+        })),
+        hint: 'Only lines holding the same material, unbagged, are listed.'
+      },
+      {
+        name: 'quantity', label: 'Quantity', type: 'number', required: true,
+        value: Math.min(short, donors[0].lendable), min: 0.0001, step: 'any',
+        hint: `This line is short ${short}.`
+      },
+      { name: 'issuedToName', label: 'Issued to', type: 'text', required: true,
+        placeholder: 'Who is taking it' },
+      { name: 'reason', label: 'Why (optional)', type: 'text',
+        placeholder: 'Weld crew waiting on the spool' }
+    ],
+    onSubmit: async (values) => {
+      const result = await api('/api/swaps', {
+        method: 'POST',
+        headers: { 'idempotency-key': idempotencyKey() },
+        body: JSON.stringify({
+          donorLineId: values.donorLineId,
+          receiverLineId: lineId,
+          quantity: Number(values.quantity),
+          issuedToName: values.issuedToName,
+          reason: values.reason || undefined
+        })
+      });
+
+      // Both lines moved, and the donor is usually a different FMR that is not
+      // on screen. Re-run the search rather than patching one card, so what is
+      // shown matches what the ledger now says.
+      $('searchForm').requestSubmit();
+      toast('Borrowed. The lending line is now owed replacement material.');
+      return result;
+    }
+  });
+}
+
 $('results').addEventListener('click', (event) => {
   const historyButton = event.target.closest('button[data-history]');
   if (historyButton) return showHistory(historyButton.dataset.history);
+
+  const borrowButton = event.target.closest('button[data-borrow]');
+  if (borrowButton) return borrowFrom(borrowButton.dataset.borrow);
 
   const button = event.target.closest('button[data-action]');
   if (!button) return;

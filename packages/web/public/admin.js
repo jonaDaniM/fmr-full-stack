@@ -20,7 +20,7 @@ const REGISTER_DEFAULTS = Object.freeze({
 
 const state = {
   tab: 'today', filter: 'Pending', data: null, filters: null,
-  bagReadiness: 'ALL', bagQuery: '',
+  bagReadiness: 'ALL', bagQuery: '', swapsAll: false,
   // Each paged tab keeps its own place, so moving between them does not put
   // somebody back at page 1 of the queue they were working through.
   queuePage: 1, queuePages: null,
@@ -738,16 +738,126 @@ async function renderToday() {
 
 // --- wiring ----------------------------------------------------------------
 
+// --- open line swaps -------------------------------------------------------
+
+/**
+ * Material one line borrowed from another, and has not replaced.
+ *
+ * The third thing the office chases, beside backorders and unissued bags.
+ * A backorder is material the office owes the field; an unissued bag is
+ * material the field is owed and cannot see; an open swap is material one
+ * line owes another. Without this queue a shortage moves quietly from one
+ * drawing to the next and lives in somebody's text messages.
+ *
+ * Oldest first, because age is the signal here too.
+ */
+async function renderSwaps() {
+  const { swaps } = await api(`/api/swaps?all=${state.swapsAll ? '1' : '0'}`);
+
+  const owing = swaps.filter((s) => Number(s.qty_outstanding) > 0);
+  const outstanding = owing.reduce((sum, s) => sum + Number(s.qty_outstanding), 0);
+  const oldest = owing.length ? Math.max(...owing.map((s) => Number(s.age_days) || 0)) : 0;
+
+  $('view').innerHTML = `
+    <div class="stats">
+      <div class="stat"><span class="n">${n(owing.length)}</span><span class="l">Open swaps</span></div>
+      <div class="stat"><span class="n">${n(outstanding)}</span><span class="l">Units owed</span></div>
+      <div class="stat ${oldest > 14 ? 'stat-warn' : ''}"><span class="n">${n(oldest)}</span><span class="l">Oldest, days</span></div>
+    </div>
+    <div class="filters">
+      <button type="button" data-swap-filter="0"
+              class="chip ${state.swapsAll ? '' : 'chip-on'}">Still owed</button>
+      <button type="button" data-swap-filter="1"
+              class="chip ${state.swapsAll ? 'chip-on' : ''}">All</button>
+    </div>
+    <div class="tw"><table>
+      <thead><tr>
+        <th>Borrowed from</th><th>Given to</th><th>Material</th>
+        <th class="num w-sm">Borrowed</th><th class="num w-sm">Repaid</th>
+        <th class="num w-sm">Owed</th><th class="num w-sm">Age</th><th></th>
+      </tr></thead>
+      <tbody>
+        ${swaps.length ? swaps.map(renderSwapRow).join('') : emptyRow(8,
+          'No material has been borrowed between lines.')}
+      </tbody>
+    </table></div>`;
+}
+
+function renderSwapRow(swap) {
+  const owed = Number(swap.qty_outstanding);
+  return `
+    <tr>
+      <td><strong>${esc(swap.donor_fmr_number)}</strong> line ${esc(String(swap.donor_line_number))}
+          <span class="s">${esc(swap.donor_iso ?? '')}</span></td>
+      <td><strong>${esc(swap.receiver_fmr_number)}</strong> line ${esc(String(swap.receiver_line_number))}
+          <span class="s">${esc(swap.receiver_iso ?? '')}</span></td>
+      <td>${esc(swap.donor_description ?? '')}
+          <span class="s">${esc(swap.commodity_code ?? '')} ${esc(swap.size ?? '')}</span></td>
+      <td class="num">${n(swap.qty_borrowed)} ${esc(swap.uom ?? '')}</td>
+      <td class="num">${n(swap.qty_repaid)}</td>
+      <td class="num ${owed > 0 ? 'warn' : ''}">${n(owed)}</td>
+      <td class="num">${n(swap.age_days)}</td>
+      <td>${owed > 0
+        ? `<button type="button" class="btn btn-sm" data-repay="${esc(swap.id)}"
+                   data-owed="${esc(String(owed))}">Record replacement</button>`
+        : `<span class="s">${esc(swap.status)}</span>`}</td>
+    </tr>`;
+}
+
+
+/**
+ * Record replacement material arriving for a line that lent some away.
+ *
+ * This settles the debt only — it does not put material back on the donor's
+ * shelf. The crew does that by locating it, when the steel is physically
+ * there. Crediting a shelf from a paperwork screen would show material that
+ * nobody has actually seen.
+ */
+async function recordReplacement(swapId, owed) {
+  await dialog({
+    title: 'Record replacement material',
+    confirmLabel: 'Record it',
+    fields: [
+      {
+        name: 'quantity', label: 'Quantity received', type: 'number',
+        required: true, value: owed, min: 0.0001, max: owed, step: 'any',
+        hint: `${n(owed)} still owed. Record less if only part of it arrived.`
+      },
+      {
+        name: 'notes', label: 'Notes (optional)', type: 'textarea', rows: 2,
+        placeholder: 'Purchase order, delivery note, who received it'
+      }
+    ],
+    onSubmit: async (values) => {
+      const result = await api(`/api/swaps/${encodeURIComponent(swapId)}/repay`, {
+        method: 'POST',
+        headers: { 'idempotency-key': idempotencyKey() },
+        body: JSON.stringify({
+          quantity: Number(values.quantity),
+          notes: values.notes || undefined
+        })
+      });
+
+      await show();
+      toast(Number(result.qty_outstanding) > 0
+        ? `Recorded — ${n(result.qty_outstanding)} still owed.`
+        : 'Recorded. This swap is settled.');
+      return result;
+    }
+  });
+}
+
 const VIEWS = {
   today: renderToday, queue: renderQueue, bags: renderBags,
-  register: renderRegister, iso: renderIso
+  register: renderRegister, iso: renderIso, swaps: renderSwaps
 };
 const SKELETONS = {
   today: { stats: 4, rows: 6 },
   queue: { stats: 4, rows: 8 },
   bags: { stats: 4, rows: 8 },
   register: { stats: 4, rows: 10 },
-  iso: { stats: 1, rows: 10 }
+  iso: { stats: 1, rows: 10 },
+  swaps: { stats: 3, rows: 8 }
 };
 
 async function show() {
@@ -874,6 +984,15 @@ $('view').addEventListener('click', (event) => {
     state.bagPage = 1;
     return show();
   }
+
+  const swapFilter = event.target.closest('button[data-swap-filter]');
+  if (swapFilter) {
+    state.swapsAll = swapFilter.dataset.swapFilter === '1';
+    return show();
+  }
+
+  const repay = event.target.closest('button[data-repay]');
+  if (repay) return recordReplacement(repay.dataset.repay, Number(repay.dataset.owed));
 
   if (event.target.closest('#regDirection')) {
     state.register = {
