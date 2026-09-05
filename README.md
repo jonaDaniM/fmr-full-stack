@@ -338,7 +338,10 @@ drawing.
 
 - **Line swap** — borrowing material from another line, with the donor left
   visibly owed replacement rather than silently short
-- Tuning the drawing parser for a new project without editing a profile by hand
+- **A profile editor.** The engine already takes the profile as data and
+  `/api/import/stage` already accepts `?profile=<name>`, but nothing in the UI
+  ever sets it, so every import runs on `default.json`. What is missing is the
+  screen to choose and edit one, not the plumbing under it.
 - The Python FMR generator (`industrial-iso-takeoff-toolkit`) wired into the UI
 - Per-project extraction profiles beyond the baseline — these need real
   drawings from each project to tune

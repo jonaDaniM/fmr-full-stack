@@ -79,6 +79,31 @@ Run against your own `newFmr36` package: **26 drawings, 90 lines, 1.9 seconds.**
 It comes out as CSV rather than a workbook. Your takeoff template varies by
 project, and a CSV opens in Excel and pastes into whichever one is current.
 
+### Where each step sits
+
+You laid out the order things happen in. Mapped against the system as it now
+stands:
+
+| Your step | Where it happens |
+|---|---|
+| 1. Planners receive ISOs → create the MTO | **Import → Material Takeoff.** Same drawings, no re-keying. |
+| 2. MTO goes to the material manager and purchasers to quote | **Outside the system.** It hands you the file; what happens to it is yours. |
+| 3. Planner compiles drawings into work packages | **Outside the system**, as today. |
+| 4. Packages reviewed → turned into FMRs → published to the field | **Import → Drafts → the approval chain → the field.** |
+
+Two things worth drawing out.
+
+**The takeoff comes off the same read as the FMRs.** Steps 1 and 4 start from
+the same drawings, so the takeoff is not a second pass — the material is
+counted once and used twice.
+
+**Step 2 is where the system stops on purpose.** Tracking what was ordered and
+what arrived is the future project you mention, and it is a real one: it needs
+purchase orders, suppliers, expected dates and receipts. It is also where the
+takeoff would connect to Line Swap, because a borrowed line is repaid by
+material arriving — which is exactly what step 2 would be tracking. Worth
+knowing they are the same piece of work seen from two ends.
+
 ### 3. Add and remove lines while staging
 
 > *in the staging aspect we should have the option to add/delete lines… When
@@ -194,9 +219,37 @@ Tag and the rest, with its own queue beside Backorders. It is a real piece of
 work, comparable in size to the backorder system, and needs quoting rather than
 absorbing.
 
-**Tuning the parser for a new project.** Today this means editing a file and
-deploying. Your question — whether a user could give it examples instead — is a
-good one and has no quick answer.
+**Tuning the parser for a new project.** You asked whether you would have to
+code the logic on the backend, or whether a user could input examples instead.
+
+Neither, today — and the good news is the harder half is already done. **The
+parser has no per-project logic in it.** Everything that varies between
+projects is a small file of column names:
+
+```
+"quantity":    ["Qty", "Quantity", "Qty Req", "Qty Required", "Req Qty"],
+"size":        ["Size", "NPS", "DN", "Dia", "Diameter"],
+"description": ["Description", "Material Description", "Material", "Desc"],
+```
+
+A new project whose sheets say `REQ'D QTY` instead of `Qty` is one line in that
+file — no backend code, no logic, no deployment of the parser itself. The
+import screen already tells you which one it used, and the system already
+accepts being told to use a different one per import.
+
+**What is missing is only the screen.** Adding a project still means one of us
+putting that file on the server. Two ways forward, and the choice is yours:
+
+- **A profile editor** — you upload a sample sheet, the screen shows what it
+  read from each column and lets you correct the headings it guessed wrong.
+  This is a modest piece of work, because the file it produces already has a
+  home and the engine that reads it already exists.
+- **Learning from examples**, as you suggested — the same screen, but it
+  proposes the mapping from a sheet you have already imported correctly.
+  Slightly more work, and worth doing only after the first version proves
+  what people actually get wrong.
+
+I would build the first and see whether the second is still needed.
 
 **FMR 209 line 9** still has the duplicate backorder from the old system, three
 seconds apart. Needs your decision before anything is removed.
