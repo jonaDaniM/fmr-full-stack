@@ -119,3 +119,65 @@
 @media (max-width: 520px) {
   .takeoff-fields input { width: 100%; }
 }
+
+/* --- workbook layout: picking one, and tuning it ------------------------- */
+
+.profile-bar {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: var(--s-2) var(--s-3);
+  align-items: center;
+  margin: var(--s-4) 0;
+  padding: var(--s-3) var(--s-4);
+  border: 1px solid var(--line);
+  border-radius: var(--r-2);
+  background: var(--surface);
+}
+
+.profile-bar label { font-weight: 600; }
+.profile-bar select { min-width: 12rem; }
+.profile-bar .hint { grid-column: 1 / -1; margin: 0; }
+
+.fit { margin-top: var(--s-5); }
+
+.fit-sheet {
+  margin-bottom: var(--s-5);
+  padding: var(--s-4);
+  border: 1px solid var(--line);
+  border-radius: var(--r-2);
+}
+
+.fit-sheet h3 { margin: 0 0 var(--s-2); }
+
+/* Recognised headings read as reassurance, so they stay quiet. */
+.fit-ok { color: var(--ok, var(--dim)); margin: var(--s-2) 0; }
+
+.fit-table { width: 100%; margin-top: var(--s-3); border-collapse: collapse; }
+.fit-table th, .fit-table td {
+  padding: var(--s-2);
+  text-align: left;
+  border-bottom: 1px solid var(--line);
+  vertical-align: middle;
+}
+.fit-table code { font-family: var(--mono, ui-monospace, monospace); }
+.fit-table select { width: 100%; max-width: 20rem; }
+.fit-table .dim { margin-left: var(--s-2); font-size: 0.85em; }
+
+.save-profile {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: var(--s-2) var(--s-3);
+  align-items: center;
+  padding: var(--s-4);
+  border: 1px solid var(--line);
+  border-radius: var(--r-2);
+  background: var(--surface);
+}
+.save-profile label { font-weight: 600; }
+.save-profile .hint { grid-column: 1 / -1; margin: 0; }
+
+.tunerbar { margin-top: var(--s-4); }
+
+@media (max-width: 40rem) {
+  .profile-bar, .save-profile { grid-template-columns: 1fr; }
+}

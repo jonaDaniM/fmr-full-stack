@@ -18,6 +18,11 @@ import {
   findDonors, borrowMaterial, repaySwap, openSwaps, swapsForLine
 } from '../../core/src/services/swaps.js';
 import {
+  listProfiles, getProfile, saveProfile, deleteProfile, resolveProfile,
+  builtInProfile
+} from '../../import/src/profiles.js';
+import { fitReport } from '../../import/src/profileFit.js';
+import {
   getBackorderQueue, decideBackorder
 } from '../../core/src/services/backorderReview.js';
 import { searchLines, getFmrDetail } from '../../core/src/services/search.js';
@@ -55,7 +60,6 @@ import { takeoffDocument, takeoffFilename } from '../../import/src/mto.js';
 import {
   startJob, runJob, getJob, failAbandonedJobs
 } from '../../import/src/extractionJobs.js';
-import { readFile as readProfileFile } from 'node:fs/promises';
 import {
   authenticate, require as requirePermission, verifyGoogleToken,
   findUser, recordLogin, issueSession, readSession, membershipsFor,
@@ -544,17 +548,100 @@ function unframeFiles(body) {
   return files;
 }
 
-/** Load a project's extraction profile, falling back to the baseline. */
-async function loadProfile(name) {
-  const dir = join(dirname(fileURLToPath(import.meta.url)), '../../import/profiles');
-  const safe = String(name ?? 'default').replace(/[^a-z0-9_-]/gi, '');
-
+/**
+ * Load the profile an import should use.
+ *
+ * A profile the project has tuned wins over the built-in file of that name,
+ * so adding a project is a screen rather than a deploy.
+ */
+async function loadProfile(projectId, name) {
+  const client = await pool.connect();
   try {
-    return JSON.parse(await readProfileFile(join(dir, `${safe}.json`), 'utf8'));
-  } catch {
-    return JSON.parse(await readProfileFile(join(dir, 'default.json'), 'utf8'));
+    return await resolveProfile(client, projectId, name);
+  } finally {
+    client.release();
   }
 }
+
+/**
+ * Import profiles.
+ *
+ * Everything that varies between projects is a list of column headings, not
+ * logic, so tuning one is a screen rather than a deploy. Same permission as
+ * importing: the person who stages a file is the one who finds out the
+ * headings do not match.
+ */
+
+route('GET', /^\/api\/import\/profiles$/, async (req, res) => {
+  const ctx = await authenticate(req);
+  requirePermission(ctx, 'ownerEdit');
+  await withClient(ctx, async (c) => ({
+    profiles: await listProfiles(c, ctx.projectId)
+  }), res);
+});
+
+route('GET', /^\/api\/import\/profiles\/([0-9a-f-]{36})$/, async (req, res, { match }) => {
+  const ctx = await authenticate(req);
+  requirePermission(ctx, 'ownerEdit');
+  await withClient(ctx, (c) => getProfile(c, ctx.projectId, match[1]), res);
+});
+
+/** The definition a new profile starts from. */
+route('GET', /^\/api\/import\/profiles\/built-in\/([a-z0-9_-]+)$/,
+  async (req, res, { match }) => {
+    const ctx = await authenticate(req);
+    requirePermission(ctx, 'ownerEdit');
+    json(res, 200, { definition: await builtInProfile(match[1]) });
+  });
+
+route('POST', /^\/api\/import\/profiles$/, async (req, res) => {
+  const ctx = await authenticate(req);
+  requirePermission(ctx, 'ownerEdit');
+  const body = await readBody(req);
+  await withClient(ctx, (c) => saveProfile(c, ctx, body), res);
+});
+
+route('DELETE', /^\/api\/import\/profiles\/([0-9a-f-]{36})$/,
+  async (req, res, { match }) => {
+    const ctx = await authenticate(req);
+    requirePermission(ctx, 'ownerEdit');
+    await withClient(ctx, (c) => deleteProfile(c, ctx, match[1]), res);
+  });
+
+/**
+ * Try a profile against a real file and report how it fares.
+ *
+ * The parser matches headings exactly, so an unrecognised one fails silently.
+ * This is what makes that visible: what matched, what did not, and what each
+ * unplaced heading most likely is. Nothing is staged and nothing is saved.
+ */
+route('POST', /^\/api\/import\/profiles\/try$/, async (req, res, { url }) => {
+  const ctx = await authenticate(req);
+  requirePermission(ctx, 'ownerEdit');
+
+  const filename = url.searchParams.get('filename') ?? 'upload.xlsx';
+  const profileName = url.searchParams.get('profile') ?? 'default';
+
+  const chunks = [];
+  let size = 0;
+  for await (const chunk of req) {
+    size += chunk.length;
+    if (size > 25_000_000) throw new LedgerError('That file is too large.', 'TOO_LARGE');
+    chunks.push(chunk);
+  }
+  if (!size) throw new LedgerError('No file was uploaded.', 'NO_FILE');
+
+  const profile = await loadProfile(ctx.projectId, profileName);
+  const sheets = readWorkbook(Buffer.concat(chunks), filename);
+
+  // Report on each sheet the profile would actually read.
+  const skip = (profile.skipSheets ?? []).map((p) => new RegExp(p, 'i'));
+  const reports = sheets
+    .filter(({ name }) => !skip.some((rx) => rx.test(name)))
+    .map(({ name, grid }) => ({ sheet: name, ...fitReport(grid, profile) }));
+
+  json(res, 200, { profileName, sheets: reports });
+});
 
 /** Parse an uploaded workbook and stage it for review. Publishes nothing. */
 route('POST', /^\/api\/import\/stage$/, async (req, res, { url }) => {
@@ -580,7 +667,7 @@ route('POST', /^\/api\/import\/stage$/, async (req, res, { url }) => {
     client.release();
   }
 
-  const profile = await loadProfile(profileName);
+  const profile = await loadProfile(ctx.projectId, profileName);
   const sheets = readWorkbook(Buffer.concat(chunks), filename);
 
   const result = await stageWorkbook(ctx, {

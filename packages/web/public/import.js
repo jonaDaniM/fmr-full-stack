@@ -17,9 +17,289 @@ import {
 import { $, esc, editableNumber } from './lib/dom.js';
 import { confirmAction } from './lib/modal.js';
 import { toast, toastError } from './lib/toast.js';
-import { initShell } from './lib/shell.js';
+import { initShell, session } from './lib/shell.js';
 
-const state = { batch: null, extraction: null, polling: null, removedEverything: false };
+const state = {
+  batch: null, extraction: null, polling: null, removedEverything: false,
+  // Which workbook layout to read with, and the ones this project can pick.
+  profileName: 'default', profiles: [{ name: 'default', builtIn: true }],
+  tuning: null
+};
+
+// --- tuning a workbook layout ---------------------------------------------
+
+/**
+ * What a column can hold.
+ *
+ * These are the parser's own field names, with the wording a person would use.
+ * Description and quantity are marked because an import cannot produce a line
+ * without them — everything else is optional detail.
+ */
+const FIELDS = [
+  ['description', 'Description — required'],
+  ['quantity', 'Quantity — required'],
+  ['commodityCode', 'Commodity code'],
+  ['size', 'Size'],
+  ['uom', 'Unit of measure'],
+  ['lineNumber', 'Item / line number'],
+  ['storageLocation', 'Storage location']
+];
+
+const FIELD_LABEL = Object.fromEntries(FIELDS);
+
+/**
+ * Which layout this project last imported with.
+ *
+ * Remembered per project: a project that has tuned a layout uses it every
+ * time, rather than quietly falling back to the baseline and staging an empty
+ * batch. Kept in the browser, because it is a convenience rather than a
+ * setting anyone else needs to see.
+ */
+const rememberedKey = () => `fmr.importProfile.${session.projectId ?? 'none'}`;
+
+function rememberProfile(name) {
+  try {
+    localStorage.setItem(rememberedKey(), name);
+  } catch {
+    // Private windows and blocked site data: the picker still works, it just
+    // will not be remembered next time.
+  }
+}
+
+function rememberedProfile() {
+  try {
+    return localStorage.getItem(rememberedKey());
+  } catch {
+    return null;
+  }
+}
+
+/** Whatever this project can import with, plus the built-in baselines. */
+async function loadProfiles() {
+  try {
+    const { profiles } = await api('/api/import/profiles');
+    state.profiles = profiles;
+
+    // What this browser last chose wins. Failing that, a layout the project
+    // has tuned — because a project that went to the trouble of tuning one
+    // wants it, and silently reading with the baseline stages an empty batch
+    // and gives no reason for it. Only then the baseline.
+    const remembered = rememberedProfile();
+    state.profileName = (remembered && profiles.some((p) => p.name === remembered))
+      ? remembered
+      : (profiles.find((p) => !p.builtIn)?.name ?? 'default');
+  } catch {
+    // Not fatal: the baseline still works, and the picker falls back to it.
+    state.profiles = [{ name: 'default', builtIn: true }];
+    state.profileName = 'default';
+  }
+}
+
+/**
+ * The tuning screen.
+ *
+ * The parser matches column headings exactly, so a project whose sheets say
+ * REQ'D QTY instead of Qty imports nothing and says nothing about why. This is
+ * where somebody fixes that without a developer: upload one of their own
+ * sheets, see which headings were not recognised, say what each one holds, and
+ * save it as a layout for the project.
+ */
+function renderTuner(message = null) {
+  const tuning = state.tuning;
+
+  $('view').innerHTML = `
+    <div class="page-head">
+      <h2>Tune a workbook layout</h2>
+      <p class="lede">The reader matches column headings exactly. Show it one of
+         this project's own workbooks and tell it what the unfamiliar headings
+         hold — it will recognise them from then on.</p>
+    </div>
+
+    ${message ? `<div class="issue issue-error">${esc(message)}</div>` : ''}
+
+    <div class="drop" id="tryDrop">
+      <h3>Try a workbook</h3>
+      <p>Nothing is imported and nothing is published — this only reports what
+         the reader can and cannot see.</p>
+      <input id="tryFile" type="file" accept=".xlsx,.xls,.csv">
+      <label for="tryFile" class="btn btn-primary">Choose a workbook</label>
+    </div>
+
+    ${tuning ? renderFit(tuning) : ''}
+
+    <div class="tunerbar">
+      <button type="button" class="btn btn-quiet" id="tuneBack">Back to import</button>
+    </div>`;
+
+  $('tryFile').onchange = (event) => tryWorkbook(event.target.files[0]);
+  $('tuneBack').onclick = () => renderDrop();
+
+  if (tuning) bindTuner();
+}
+
+/** What the reader made of the file, sheet by sheet. */
+function renderFit(tuning) {
+  return `
+    <div class="fit">
+      <p class="source-line"><strong>${esc(tuning.filename)}</strong> &middot;
+         read with the "${esc(tuning.profileName)}" layout</p>
+
+      ${tuning.sheets.map(renderFitSheet).join('')}
+
+      <div class="save-profile">
+        <label for="profileName">Save this layout as</label>
+        <input id="profileName" type="text" value="${esc(tuning.saveAs)}"
+               placeholder="Midwest Expansion" autocomplete="off">
+        <button type="button" class="btn btn-primary" id="saveProfile">Save layout</button>
+        <p class="hint">Saving under an existing name replaces it. The next
+           import can then pick this layout.</p>
+      </div>
+    </div>`;
+}
+
+function renderFitSheet(sheet) {
+  const unplaced = sheet.unmatched.filter((u) => !u.hidden);
+
+  return `
+    <div class="fit-sheet">
+      <h3>${esc(sheet.sheet)}</h3>
+
+      ${sheet.headerRow === null
+        ? `<p class="issue issue-error">No heading row was found in this sheet.
+             It may be a cover page, or the headings may be further down than
+             the reader looks.</p>`
+        : `<p class="dim">Headings found on row ${esc(String(sheet.headerRow + 1))}.</p>`}
+
+      ${sheet.matched.length ? `
+        <p class="fit-ok"><strong>Recognised:</strong>
+          ${sheet.matched.map((m) =>
+            `${esc(m.heading)} <span class="dim">→ ${esc(FIELD_LABEL[m.field] ?? m.field)}</span>`
+          ).join(' &middot; ')}</p>` : ''}
+
+      ${sheet.missing.length ? `
+        <p class="issue issue-error">Nothing is mapped to
+          ${sheet.missing.map((f) => esc(FIELD_LABEL[f] ?? f)).join(' or ')}.
+          An import would produce no lines until that is fixed.</p>` : ''}
+
+      ${unplaced.length ? `
+        <table class="fit-table">
+          <thead><tr><th>Heading in the file</th><th>What it holds</th></tr></thead>
+          <tbody>
+            ${unplaced.map((u) => `
+              <tr>
+                <td><code>${esc(u.heading)}</code></td>
+                <td>
+                  <select data-map="${esc(u.heading)}">
+                    <option value="">— leave it out —</option>
+                    ${FIELDS.map(([field, label]) => `
+                      <option value="${esc(field)}"
+                              ${field === u.suggestion ? 'selected' : ''}>
+                        ${esc(label)}</option>`).join('')}
+                  </select>
+                  ${u.suggestion
+                    ? '<span class="dim">suggested</span>'
+                    : ''}
+                </td>
+              </tr>`).join('')}
+          </tbody>
+        </table>`
+        : `<p class="fit-ok">Every heading in this sheet was recognised.</p>`}
+    </div>`;
+}
+
+function bindTuner() {
+  $('saveProfile').onclick = saveTunedProfile;
+}
+
+/** Send one workbook and report what the current layout made of it. */
+async function tryWorkbook(file) {
+  if (!file) return;
+
+  try {
+    const buffer = await file.arrayBuffer();
+    const result = await api(
+      `/api/import/profiles/try?filename=${encodeURIComponent(file.name)}`
+      + `&profile=${encodeURIComponent(state.profileName)}`,
+      { method: 'POST', headers: { 'content-type': 'application/octet-stream' },
+        body: buffer }
+    );
+
+    state.tuning = {
+      filename: file.name,
+      profileName: result.profileName,
+      sheets: result.sheets,
+      saveAs: state.profiles.find((p) => p.name === state.profileName && !p.builtIn)
+        ? state.profileName
+        : ''
+    };
+    renderTuner();
+  } catch (failure) {
+    renderTuner(failure.message);
+  }
+}
+
+/**
+ * Save what was mapped as a layout for this project.
+ *
+ * The exact heading is recorded, so the next import matches it outright rather
+ * than relying on the same guess being made again.
+ */
+async function saveTunedProfile() {
+  const name = $('profileName').value.trim();
+  if (!name) return toastError('Give the layout a name.');
+
+  const chosen = [...document.querySelectorAll('select[data-map]')]
+    .map((select) => ({ heading: select.dataset.map, field: select.value }))
+    .filter((entry) => entry.field);
+
+  try {
+    const { definition } = await api(
+      `/api/import/profiles/built-in/${encodeURIComponent(
+        state.profiles.find((p) => p.name === state.profileName)?.basedOn ?? 'default')}`
+    );
+
+    // Start from what the current layout already knows, then add what was just
+    // mapped — so tuning one sheet never loses headings learned earlier.
+    const base = await currentDefinition(definition);
+    const columns = { ...(base.columns ?? {}) };
+    for (const { heading, field } of chosen) {
+      const existing = columns[field] ?? [];
+      const already = existing.some((alias) =>
+        String(alias).toUpperCase().replace(/[^A-Z0-9]/g, '')
+        === heading.toUpperCase().replace(/[^A-Z0-9]/g, ''));
+      if (!already) columns[field] = [...existing, heading];
+    }
+
+    await api('/api/import/profiles', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        id: state.profiles.find((p) => p.name === name && !p.builtIn)?.id,
+        name,
+        definition: { ...base, columns },
+        basedOn: state.profileName
+      })
+    });
+
+    await loadProfiles();
+    state.profileName = name;
+    rememberProfile(name);
+    state.tuning = null;
+    toast(`Saved. Imports can now be read with the "${name}" layout.`);
+    renderDrop();
+  } catch (failure) {
+    toastError(failure.message);
+  }
+}
+
+/** The definition the current layout is actually using. */
+async function currentDefinition(fallback) {
+  const chosen = state.profiles.find((p) => p.name === state.profileName);
+  if (!chosen || chosen.builtIn) return fallback;
+
+  const saved = await api(`/api/import/profiles/${encodeURIComponent(chosen.id)}`);
+  return saved.definition ?? fallback;
+}
 
 // --- upload ----------------------------------------------------------------
 
@@ -36,6 +316,20 @@ function renderDrop(message = null) {
     <p class="hint">Drop a whole IWP package of drawings at once — the material
        on each one becomes an FMR to check. Workbooks are read one sheet per
        FMR, and an extraction CSV one drawing per FMR.</p>
+
+    <div class="profile-bar">
+      <label for="profilePick">Workbook layout</label>
+      <select id="profilePick">
+        ${state.profiles.map((profile) => `
+          <option value="${esc(profile.name)}"
+                  ${profile.name === state.profileName ? 'selected' : ''}>
+            ${esc(profile.name)}${profile.builtIn ? '' : ' (this project)'}
+          </option>`).join('')}
+      </select>
+      <button type="button" class="btn btn-quiet" id="tuneProfile">Tune it</button>
+      <p class="hint">Which column headings this project's workbooks use. Drawings
+         and extraction CSVs ignore this.</p>
+    </div>
 
     <div class="takeoff-offer">
       <h3>Or take material off for ordering</h3>
@@ -66,6 +360,12 @@ function renderDrop(message = null) {
   }
 
   drop.addEventListener('drop', (e) => send([...(e.dataTransfer?.files ?? [])]));
+
+  $('profilePick').onchange = (event) => {
+    state.profileName = event.target.value;
+    rememberProfile(state.profileName);
+  };
+  $('tuneProfile').onclick = () => renderTuner();
 
   $('mtoFile').onchange = (event) => sendTakeoff([...event.target.files]);
 }
@@ -232,7 +532,8 @@ async function sendOneFile(file) {
 
   const path = extracted
     ? `/api/import/extracted?filename=${encodeURIComponent(file.name)}`
-    : `/api/import/stage?filename=${encodeURIComponent(file.name)}`;
+    : `/api/import/stage?filename=${encodeURIComponent(file.name)}`
+      + `&profile=${encodeURIComponent(state.profileName)}`;
 
   try {
     const result = await uploadWithProgress(path, buffer, {
@@ -650,8 +951,10 @@ await initShell({
     state.polling = null;
     state.batch = null;
     state.extraction = null;
+    await loadProfiles();
     renderDrop();
   }
 });
 
+await loadProfiles();
 renderDrop();
