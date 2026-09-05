@@ -274,6 +274,32 @@ Attribution sits on the row itself — `planner_decided_by/at/note`,
 the fact, and a CHECK constraint keeps a decision from existing without a
 decider.
 
+### Line swaps
+
+`line_swaps` and `line_swap_repayments`. When one line lends material to
+another, two things are recorded separately: the movement, as `SWAP_LENT` and
+`SWAP_BORROWED` rows in `material_transactions` sharing a `correlation_id`,
+and the obligation, as a `line_swaps` row.
+
+Keeping them apart is what makes the queue answerable. Collapsing a borrow into
+a single adjusted number loses the question everyone asks later — who is still
+owed what, and for how long.
+
+The donor's movement reduces `qty_confirmed_located` and `qty_available`
+together, so `located_accounted_for` still holds, and leaves `qty_requested`
+alone, so `qty_not_yet_located` rises by what was lent. That is the invariant
+this feature exists to protect: **a donor never gains credit for satisfying its
+own requirement by giving material away.**
+
+`qty_outstanding` is generated from `qty_borrowed - qty_repaid`, so a swap
+cannot drift out of step with its repayments. A repayment settles the
+obligation and nothing else — the donor's shelf is credited only when a crew
+locates the material, because paperwork arriving is not steel arriving.
+
+Both lines are locked lowest-id-first in `services/swaps.js`. Two crews
+borrowing from each other simultaneously would otherwise each hold the row the
+other needs.
+
 ### Permissions
 
 `project_members` stores **six independent booleans**, not a role string:

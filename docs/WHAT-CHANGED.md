@@ -120,11 +120,63 @@ be sent to find.
 Both are recorded. Material that stopped being requisitioned is a decision
 worth being able to trace.
 
+### 4. Line Swap — borrowing material from another line
+
+> *when one ISO or FMR line is short material but another line has the exact
+> material available, the field often borrows it informally to keep work
+> moving… there is usually no clean record showing who borrowed the material,
+> how much was borrowed, or whether it was ever replaced.*
+
+Built, as you described it: the physical movement and the replenishment debt
+are kept as **two separate records**, which is the part that makes it work.
+
+**For the field.** A line that is short now offers *Borrow from another line*.
+It lists only lines holding the same material — matched on commodity code,
+size and unit of measure, never on the description — and only what is actually
+on their shelf. Bagged material is not offered: it is already promised to a
+crew under a bag tag, and casually reassigning it is how two crews end up
+looking for the same steel.
+
+**The accounting is the point.** When 25 feet moves:
+
+| | Before | After |
+|---|---|---|
+| Donor, on the shelf | 80 | 55 |
+| Donor, still to find | 20 | 45 |
+| Donor, requirement | 100 | **100** |
+| Receiver, issued | 0 | 25 |
+
+The receiving line gets full credit — its requirement is met and the crew can
+work. The donor's requirement does **not** shrink, so the shortage reappears
+on the donor the moment the material walks away instead of disappearing into a
+conversation. That was the failure you described, and it is the one thing the
+system now refuses to let happen.
+
+**For the office.** A new **Line swaps** tab, beside Backorders and Active
+bags. It shows what is still owed, by whom, to whom, for which commodity, how
+much, and how many days it has been open. *Record replacement* settles a debt
+in full or in part.
+
+One deliberate restriction: recording replacement material **does not put it
+back on the donor's shelf**. It settles the obligation only. The crew still
+has to locate the material when it physically arrives, because a screen in the
+office saying material exists is not the same as somebody seeing it on a rack.
+
+Everything is answerable afterwards — who borrowed it, which ISO supplied it,
+which ISO consumed it, what commodity and size, how much is still owed, and
+how long it has been outstanding.
+
+**What is not in this first version**, matching the scope you set: automatic
+matching of incoming deliveries to open swaps. You were right that it is the
+risky part — the earlier Materials Tracker let one incoming quantity satisfy
+several swaps at full value. Repayment here is explicit and can never exceed
+what a swap actually owes.
+
 ---
 
 ## What we found while checking
 
-### 4. The numbering error that started all this
+### 5. The numbering error that started all this
 
 This is the important one.
 
@@ -142,7 +194,7 @@ is advice that could not work. Now:
 the system had no concept of FMR numbering, and like it was blocking a second
 FMR on the same drawing. Neither was true — which brings us to the next part.
 
-### 5. A package that could not be read now says what it held
+### 6. A package that could not be read now says what it held
 
 Your `newFmr36` upload. We ran that exact file: it reads correctly — 26
 drawings, the first on page 17, exactly as you noted. Pages 1–16 are a cover,
@@ -164,7 +216,7 @@ about are highlighted in the review table with the reason, and pages it sets
 aside are reported on the batch. What was missing was only the all-or-nothing
 case above.
 
-### 6. Removing everything no longer blames the file
+### 7. Removing everything no longer blames the file
 
 After removing the last FMR from a batch, the screen said *"No FMRs were found
 in that file. Check it is the right one"* — about a file that read perfectly,
@@ -174,7 +226,7 @@ still showed the batch as staged.
 Found by clicking the buttons rather than testing the endpoints. The rules were
 right in both cases; only the screen was wrong.
 
-### 7. Roles were being downgraded on the way out of the database
+### 8. Roles were being downgraded on the way out of the database
 
 While testing the new roles: a Planner saved correctly but **read back as Read
 Only**, and a Material Admin as a custom permission set. Saving such a person
@@ -195,7 +247,7 @@ permission set has been quietly downgraded on the way out.
 It never did. The duplicate check matches on **FMR number only** — never on the
 drawing. Your example works today: pipe and field welds now, valves and gaskets
 months later, same drawing, different numbers, both publish. What you hit was
-the numbering error in point 4.
+the numbering error in point 5.
 
 **The FMR number is shown in Drafts and in the Register.** It is the first
 column of the register, in bold, and the heading of every card in Drafts. If
@@ -212,12 +264,6 @@ sequence instead, that is a decision to make deliberately rather than a bug.
 ---
 
 ## Still open
-
-**Line Swap / material borrowing.** Your proposal is sound and fits how the
-system already works — it would become a seventh field action alongside Bag &
-Tag and the rest, with its own queue beside Backorders. It is a real piece of
-work, comparable in size to the backorder system, and needs quoting rather than
-absorbing.
 
 **Tuning the parser for a new project.** You asked whether you would have to
 code the logic on the backend, or whether a user could input examples instead.
@@ -262,7 +308,7 @@ Not by reading the code. Every change above was driven through a real browser:
 signed in by clicking a name, navigated by clicking the menu, files chosen
 through the file picker, buttons clicked where they actually sit on screen.
 
-That is what found points 6 and 7 — in both cases the server was correct and
+That is what found points 7 and 8 — in both cases the server was correct and
 only the screen was wrong, which no amount of testing the server would have
 shown.
 

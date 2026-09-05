@@ -334,10 +334,36 @@ drawing.
 `packages/extract-iso/src/iso_bom/mto.py` holds the classification rules, and
 `packages/import/src/mto.js` writes the document.
 
+## Line swap
+
+When one line is short and another holds the same material on the shelf, the
+field borrows it. That happened already; what was missing was the record.
+
+Two facts kept deliberately apart:
+
+- **the movement** — `SWAP_LENT` and `SWAP_BORROWED` in `material_transactions`,
+  sharing one `correlation_id`
+- **the obligation** — a row in `line_swaps`, carrying what is still owed
+
+The rule that matters: material leaving the donor reduces both its located and
+its available total and **never touches `qty_requested`**, so the donor's
+shortfall reappears immediately. A donor must never gain credit for satisfying
+its own requirement by giving material away.
+
+Only unbagged material is lendable — bagged stock is already promised to a crew.
+Candidates match on commodity code, size and unit of measure; a line with no
+commodity code is never matched, because guessing from a description is how the
+wrong steel reaches a weld.
+
+Recording a repayment settles the debt only. It does not credit the donor's
+shelf — the crew locates the material when it physically arrives.
+
+`packages/core/src/domain/swap.js` holds the rules, `services/swaps.js` the
+persistence. Both lines are locked lowest-id-first, so two crews borrowing from
+each other at the same moment cannot deadlock.
+
 ## Not yet built
 
-- **Line swap** — borrowing material from another line, with the donor left
-  visibly owed replacement rather than silently short
 - **A profile editor.** The engine already takes the profile as data and
   `/api/import/stage` already accepts `?profile=<name>`, but nothing in the UI
   ever sets it, so every import runs on `default.json`. What is missing is the

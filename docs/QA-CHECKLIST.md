@@ -285,6 +285,34 @@ create and to number, and give someone the **Planner** role to approve.
 - [ ] Removing every FMR says **the batch was emptied** — not "no FMRs were
       found in that file"
 
+## 26. Line swap — borrowing between lines
+
+Needs two FMRs whose lines share a commodity code, size and unit: one holding
+material on the shelf, one short.
+
+- [ ] A short line offers **Borrow from another line**; a satisfied line does not
+- [ ] The donor list shows the FMR, line, quantity on the shelf and drawing
+- [ ] A line whose material nobody else holds says so, rather than opening an
+      empty list
+- [ ] A line with no commodity code explains that, rather than showing nothing
+- [ ] Bagged material is **not** offered as borrowable
+- [ ] After borrowing 25: the receiver shows 25 issued
+- [ ] After borrowing 25: the donor's shelf falls by 25 **and its requested
+      quantity is unchanged** — the shortfall reappears on the donor
+- [ ] The donor's line status is no longer "Located"
+
+In the office, **Line swaps** beside Backorders and Active bags:
+
+- [ ] The swap appears, showing donor, receiver, material, borrowed and owed
+- [ ] A field-only user cannot open this tab
+- [ ] **Record replacement** prefills the outstanding amount
+- [ ] Recording part of it leaves the swap open with the balance owed
+- [ ] Recording the balance settles it and removes it from **Still owed**
+- [ ] **All** still shows the settled swap
+- [ ] Recording a replacement does **not** put material back on the donor's
+      shelf — the crew still has to locate it
+- [ ] The line's History shows the borrow on both lines
+
 ---
 
 ## Sign-off

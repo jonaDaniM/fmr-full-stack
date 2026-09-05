@@ -13,8 +13,8 @@ those backorders. The ledger of who has what is the whole point of the system.
 brew services start postgresql@17   # once
 npm start                           # http://localhost:3000
 npm run start:reset                 # wipe and start fresh
-npm test                            # 299 tests + the web and SQL checks
-npm run test:db                     # 45 more, against a real Postgres
+npm test                            # 324 tests + the web and SQL checks
+npm run test:db                     # 55 more, against a real Postgres
 ```
 
 Sign in by picking a seeded user. Jonathan D. is an owner and sees everything.
@@ -124,6 +124,13 @@ Eight commits are ahead of the deployed revision, including migration `011`,
 which adds the approval chain. **That migration must run before the new code
 serves** — publishing references `workflow_state`.
 
-What the client has asked for and is not built: Line Swap (borrowing material
-between lines, with a repayment obligation), and a way to tune the drawing
-parser for a new project without editing a profile by hand.
+Migration `012` adds Line Swap. Two rules there are easy to undo by accident:
+lending reduces the donor's located **and** available totals and never touches
+`qty_requested` (otherwise a donor gains credit for material it gave away), and
+`lockPair` locks both lines lowest-id-first (otherwise two crews borrowing from
+each other deadlock). Recording a repayment settles the obligation only — it
+must not credit the donor's shelf.
+
+What the client has asked for and is not built: a way to tune the drawing
+parser for a new project without editing a profile by hand, and automatic
+matching of incoming deliveries to open swaps.
