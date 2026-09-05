@@ -248,18 +248,53 @@ Nothing publishes automatically. A batch is staged, validated, and a person
 checks it in the drafts queue before a crew is sent looking for anything.
 `import_issues` anchors each problem to the row or field that caused it.
 
+### The approval chain
+
+`import_items.workflow_state` is how far a requisition has got:
+
+```
+DRAFT → PENDING_PLANNER_REVIEW → PLANNER_APPROVED → PENDING_MATERIAL_MANAGER
+      → NUMBER_ASSIGNED → PUBLISHED
+                ↓
+        PLANNER_RETURNED ──(corrected)──→ back to PENDING_PLANNER_REVIEW
+```
+
+Publishing is refused from anything but `NUMBER_ASSIGNED`, so an FMR reaches a
+crew only once a planner has approved it **and** the material manager has given
+it its official number — the identifier the field searches by and purchasing
+quotes against.
+
+The moves live in `core/src/domain/workflow.js`, which is pure: it holds every
+legal transition, who may make it, and the sentence a person is shown when they
+cannot. `import/src/workflow.js` applies them in a transaction with the row
+locked, and writes a `WORKFLOW_*` audit row per move.
+
+Attribution sits on the row itself — `planner_decided_by/at/note`,
+`numbered_by/at` — because "who approved this" is a question asked long after
+the fact, and a CHECK constraint keeps a decision from existing without a
+decider.
+
 ### Permissions
 
-`project_members` stores **four independent booleans**, not a role string:
+`project_members` stores **six independent booleans**, not a role string:
 
 ```
-search  fieldTransact  adminBackorder  ownerEdit
+search  fieldTransact  adminBackorder  ownerEdit  planReview  assignNumber
 ```
 
-Four combinations have names (`READ_ONLY`, `FIELD`, `ADMIN`, `OWNER`); anything
-else reports as `CUSTOM` and is preserved. **`ADMIN` is not a superset of
-`FIELD`** — deciding backorders at a desk is a different job from issuing pipe
-in a warehouse, and conflating them was a real risk worth encoding.
+Five combinations have names (`READ_ONLY`, `FIELD`, `PLANNER`, `ADMIN`,
+`OWNER`); anything else reports as `CUSTOM` and is preserved. **`ADMIN` is not
+a superset of `FIELD`** — deciding backorders at a desk is a different job from
+issuing pipe in a warehouse, and conflating them was a real risk worth
+encoding. `PLANNER` follows the same logic: reviewing a package against the
+work scope is not owning the numbering series, so the two are separate flags
+and a site can split them.
+
+**Adding a permission touches four places**, and missing one fails quietly:
+`domain/roles.js`, both the `SELECT` and the `INSERT` in `services/admin.js`,
+and both queries in `api/src/auth.js`. A missed `SELECT` makes every named
+profile read as `CUSTOM` — which has happened twice, so
+`test/db/member-roles.test.js` now round-trips all of them.
 
 Guards, all server-side: the last active owner cannot be demoted or
 deactivated, and nobody can deactivate themselves.

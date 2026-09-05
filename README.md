@@ -72,12 +72,24 @@ exist in `users` — an owner adds people from the owner screen.
 ## Tests
 
 ```bash
-npm test
+npm test            # 299, no database needed
+npm run test:db     # 45 more, against a real Postgres
 ```
 
-Covers the ledger, the backorder lifecycle, ISO search parsing, and a
-randomised check that no sequence of actions can produce a state the schema
-would reject.
+`npm test` covers the ledger, the backorder lifecycle, the approval chain, ISO
+search parsing, and a randomised check that no sequence of actions can produce
+a state the schema would reject. It needs no database, which is why it runs in
+under a second.
+
+`test:db` covers what a pure test cannot see — a constraint firing, a profile
+read back out of the database, publishing actually refused. Set
+`FMR_TEST_DATABASE_URL` to run it; without one it skips.
+
+The Python extractor has its own suite:
+
+```bash
+cd packages/extract-iso && .venv/bin/python3 -m pytest tests/ -q   # 50
+```
 
 ## The ledger
 
@@ -179,16 +191,18 @@ it also holds on create.
 
 ## Users and lists
 
-Roles are four named permission sets. `ADMIN` is deliberately not a superset of
+Roles are five named permission sets. `ADMIN` is deliberately not a superset of
 `FIELD`: deciding backorders from a desk is a different job from issuing pipe
-in a warehouse.
+in a warehouse. `PLANNER` follows the same logic — reviewing a package is not
+owning the numbering series.
 
-| Profile | Search | Field | Backorders | Owner |
-|---|---|---|---|---|
-| Read Only | ✓ | | | |
-| Field User | ✓ | ✓ | | |
-| Material Admin | ✓ | | ✓ | |
-| System Owner | ✓ | ✓ | ✓ | ✓ |
+| Profile | Search | Field | Backorders | Review | Number | Owner |
+|---|---|---|---|---|---|---|
+| Read Only | ✓ | | | | | |
+| Field User | ✓ | ✓ | | | | |
+| Planner | ✓ | | | ✓ | | |
+| Material Admin | ✓ | | ✓ | | ✓ | |
+| System Owner | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 
 A permission set matching none of these reports as `CUSTOM` and is left alone.
 FMRv3's editor silently coerced it to Read Only, so opening such a user and
@@ -292,8 +306,39 @@ out of agreement, and a database will not — so drift has to be found before th
 load, not halfway through it. A batch with problems is refused rather than
 partly applied.
 
+## Approval chain
+
+An FMR reaches a crew only after two decisions, by two different people:
+
+```
+DRAFT → with the planner → approved → waiting for a number → numbered → published
+```
+
+The planner checks the requisition suits the work package, and may return it
+with a note; a corrected one re-enters review rather than going around it. The
+material manager assigns the official FMR number and releases it. Publishing
+is refused from any other state, and every move is audited with who and when.
+
+Rules in `core/src/domain/workflow.js` (pure), applied by
+`import/src/workflow.js`. The queue is `/review.html`, which shows each person
+only what is waiting on them.
+
+## Material takeoff
+
+The document the material team buys from, before any FMR exists. Same drawing
+scan, different question: `POST /api/import/takeoff` returns the takeoff form
+as CSV, split by how material is bought — pipe and fittings, bolts and gaskets,
+everything else — with pipe by the foot and the pipe schedule read off each
+drawing.
+
+`packages/extract-iso/src/iso_bom/mto.py` holds the classification rules, and
+`packages/import/src/mto.js` writes the document.
+
 ## Not yet built
 
+- **Line swap** — borrowing material from another line, with the donor left
+  visibly owed replacement rather than silently short
+- Tuning the drawing parser for a new project without editing a profile by hand
 - The Python FMR generator (`industrial-iso-takeoff-toolkit`) wired into the UI
 - Per-project extraction profiles beyond the baseline — these need real
   drawings from each project to tune

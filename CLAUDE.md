@@ -13,7 +13,8 @@ those backorders. The ledger of who has what is the whole point of the system.
 brew services start postgresql@17   # once
 npm start                           # http://localhost:3000
 npm run start:reset                 # wipe and start fresh
-npm test                            # 173 tests + the web-layer check
+npm test                            # 299 tests + the web and SQL checks
+npm run test:db                     # 45 more, against a real Postgres
 ```
 
 Sign in by picking a seeded user. Jonathan D. is an owner and sees everything.
@@ -105,9 +106,24 @@ corrections. The short version:
   reserved or issued.
 - Corrections write an opposite entry; they never edit or delete history.
 - `ADMIN` is not a superset of `FIELD`. Office staff do not move material.
+- **Publishing is gated on the approval chain**, not on a permission alone.
+  An FMR reaches `PUBLISHED` only from `NUMBER_ASSIGNED` — see
+  `domain/workflow.js`, which is pure and holds every legal move.
+- **A new permission means four places, not one.** `domain/roles.js`, the
+  `SELECT` and the `INSERT` in `services/admin.js`, and both queries in
+  `api/src/auth.js`. Miss the `SELECT` and profiles silently read as CUSTOM;
+  that has now happened twice.
 
 ## State of things
 
-Runs against PostgreSQL 17, verified end to end. Not yet deployed, and
-Jonathan's live spreadsheet has not been migrated — `packages/migrate` has a
-dry run that reports what would fail before anything is written.
+Deployed, and carrying the client's real data — 837 FMRs, 5,706 lines, 22
+Turner Industries users. `packages/migrate` did the load; its dry run still
+reports what would fail before anything is written.
+
+Eight commits are ahead of the deployed revision, including migration `011`,
+which adds the approval chain. **That migration must run before the new code
+serves** — publishing references `workflow_state`.
+
+What the client has asked for and is not built: Line Swap (borrowing material
+between lines, with a repayment obligation), and a way to tune the drawing
+parser for a new project without editing a profile by hand.

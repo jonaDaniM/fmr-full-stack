@@ -235,6 +235,56 @@ Sign in as **Sam Okafor** or Jonathan. Office → Backorders.
 - [ ] Refreshing does not repeat the last action
 - [ ] Being signed out mid-task returns you to sign-in and back to where you were
 
+## 23. The approval chain
+
+Nothing reaches a crew until a planner has approved it and the material manager
+has given it its number. Two people are needed: sign in as **Jonathan D.** to
+create and to number, and give someone the **Planner** role to approve.
+
+- [ ] Owner → Users shows **Planner** in the role list
+- [ ] Saving someone as Planner, then reopening them, still shows **Planner** —
+      not Read Only
+- [ ] A Planner signing in sees a **Review** tab
+- [ ] A Field User does not see Review
+- [ ] A new draft appears in Review as **Draft** with "Send for review"
+- [ ] A draft with a missing quantity refuses to be sent, and names the problem
+- [ ] After sending, it reads **With the planner**
+- [ ] The planner sees it; the material manager does not yet
+- [ ] Approving asks first, then it reads **Planner approved**
+- [ ] Returning it demands a note, and the note is shown on the card afterwards
+- [ ] A returned draft, corrected and resubmitted, goes **back to the planner**
+- [ ] After "Send to material management" it reads **Waiting for a number**
+- [ ] The material manager sees it now; the planner does not
+- [ ] A planner has no "Give it its number" button — **only Material Admin does**
+- [ ] Assigning a number that is already published is refused, and says so
+- [ ] After numbering it reads **Numbered, ready to publish**
+- [ ] **Publishing an FMR that has not been through this is refused**, and the
+      message says what is missing
+- [ ] Publishing a numbered one works, and the field can then search it
+- [ ] Owner → the FMR's history shows who approved it and who numbered it
+
+## 24. Material takeoff
+
+- [ ] Import shows "Or take material off for ordering" below the drop zone
+- [ ] Choosing drawings downloads a file named `MTO <cwa>-<iwp>.csv`
+- [ ] A CWA typed into the box appears in every row
+- [ ] The file has three sheets: **PIPE & FITTINGS**, **BOLTS & GASKETS**,
+      **COMBINED** — an empty one says so rather than looking broken
+- [ ] Pipe is **LF** with no foot mark in the quantity; everything else is EA
+- [ ] A support (`U-BOLT GUIDE FOR 2" PIPE`) is counted, **not** measured in feet
+- [ ] The pipe schedule column is filled from the drawing
+- [ ] Opening it in Excel keeps commodity codes as text — no dates
+
+## 25. Removing staged material
+
+- [ ] Each line in the import review has an × ; each FMR has **Remove**
+- [ ] Removing a line asks first, and names the line
+- [ ] Cancelling changes nothing
+- [ ] After removing a line the ones below renumber with no gap
+- [ ] Removing the last line on an FMR is refused, and says to remove the FMR
+- [ ] Removing every FMR says **the batch was emptied** — not "no FMRs were
+      found in that file"
+
 ---
 
 ## Sign-off
