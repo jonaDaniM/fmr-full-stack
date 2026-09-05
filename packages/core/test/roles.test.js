@@ -7,14 +7,37 @@ import {
 
 test('each profile grants what its name implies', () => {
   assert.deepEqual(permissionsFor('READ_ONLY'), {
-    search: true, fieldTransact: false, adminBackorder: false, ownerEdit: false
+    search: true, fieldTransact: false, adminBackorder: false, ownerEdit: false,
+    planReview: false, assignNumber: false
   });
   assert.deepEqual(permissionsFor('FIELD'), {
-    search: true, fieldTransact: true, adminBackorder: false, ownerEdit: false
+    search: true, fieldTransact: true, adminBackorder: false, ownerEdit: false,
+    planReview: false, assignNumber: false
   });
   assert.deepEqual(permissionsFor('OWNER'), {
-    search: true, fieldTransact: true, adminBackorder: true, ownerEdit: true
+    search: true, fieldTransact: true, adminBackorder: true, ownerEdit: true,
+    planReview: true, assignNumber: true
   });
+});
+
+test('a planner reviews packages and touches no material', () => {
+  // The planner's job is whether a requisition suits the work package. They
+  // do not issue, do not decide backorders, and — per the client's process —
+  // deliberately do not own the FMR number.
+  const planner = permissionsFor('PLANNER');
+  assert.equal(planner.planReview, true);
+  assert.equal(planner.assignNumber, false);
+  assert.equal(planner.fieldTransact, false);
+  assert.equal(planner.adminBackorder, false);
+});
+
+test('the material admin owns the FMR number', () => {
+  // "The option to change the FMR number shouldn't be so easily available —
+  // it should be something that only a Material Admin can do."
+  const admin = permissionsFor('ADMIN');
+  assert.equal(admin.assignNumber, true);
+  assert.equal(permissionsFor('FIELD').assignNumber, false);
+  assert.equal(permissionsFor('PLANNER').assignNumber, false);
 });
 
 test('an office admin cannot move material', () => {
@@ -66,8 +89,10 @@ test('the returned permissions cannot mutate the profile table', () => {
 });
 
 test('profiles list in order of increasing access', () => {
+  // PLANNER sits between FIELD and ADMIN: it decides nothing about material,
+  // only whether a requisition suits the work package.
   const keys = listProfiles().map((p) => p.key);
-  assert.deepEqual(keys, ['READ_ONLY', 'FIELD', 'ADMIN', 'OWNER']);
+  assert.deepEqual(keys, ['READ_ONLY', 'FIELD', 'PLANNER', 'ADMIN', 'OWNER']);
   assert.ok(listProfiles().every((p) => p.label && p.description));
 });
 

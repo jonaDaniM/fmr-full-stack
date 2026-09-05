@@ -47,6 +47,7 @@ import { getBootstrap } from '../../core/src/services/bootstrap.js';
 import { readWorkbook, WorkbookError } from '../../import/src/workbook.js';
 import { groupExtractedRows, describeExtraction } from '../../import/src/extracted.js';
 import { extractDrawings } from '../../import/src/runner.js';
+import { advance, assignNumber, reviewQueue } from '../../import/src/workflow.js';
 import { takeoffDocument, takeoffFilename } from '../../import/src/mto.js';
 import {
   startJob, runJob, getJob, failAbandonedJobs
@@ -706,6 +707,43 @@ route('POST', /^\/api\/import\/takeoff$/, async (req, res, { url }) => {
     'x-takeoff-drawings': String(takeoff.drawings)
   });
   res.end(document);
+});
+
+// --- the approval chain ----------------------------------------------------
+//
+// An FMR reaches a crew once a planner has approved it and the material
+// manager has given it its official number. These are the moves between.
+
+/** What is waiting on whoever is asking. */
+route('GET', /^\/api\/review$/, async (req, res, { url }) => {
+  const ctx = await authenticate(req);
+  requirePermission(ctx, 'search');
+  await withClient(ctx, (c) => reviewQueue(c, ctx, {
+    state: url.searchParams.get('state') || null
+  }), res);
+});
+
+/** Submit, approve, return, or send on. The domain decides who may. */
+route('POST', /^\/api\/review\/advance$/, async (req, res) => {
+  const ctx = await authenticate(req);
+  requirePermission(ctx, 'search');
+
+  const body = await readBody(req);
+  json(res, 200, await advance(ctx, body));
+});
+
+/**
+ * Give an FMR its official number.
+ *
+ * Its own route because it is its own decision, owned by material control —
+ * not a header field anyone editing a draft can change.
+ */
+route('POST', /^\/api\/review\/number$/, async (req, res) => {
+  const ctx = await authenticate(req);
+  requirePermission(ctx, 'search');
+
+  const body = await readBody(req);
+  json(res, 200, await assignNumber(ctx, body));
 });
 
 /** How a package being read is getting on. */

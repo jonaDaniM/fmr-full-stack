@@ -22,6 +22,8 @@ export const SCREENS = [
     detail: 'Search for material, confirm what you found, bag it, issue it, raise a backorder.' },
   { href: '/admin.html', id: 'office', label: 'Office', need: 'adminBackorder',
     detail: 'Decide backorders, read the FMR register, see progress by drawing.' },
+  { href: '/review.html', id: 'review', label: 'Review', need: ['planReview', 'assignNumber'],
+    detail: 'Approve a requisition for its work package, or give it its FMR number.' },
   { href: '/drafts.html', id: 'drafts', label: 'Drafts', need: 'ownerEdit',
     detail: 'Write up an FMR by hand, or review one that came from a drawing.' },
   { href: '/import.html', id: 'import', label: 'Import', need: 'ownerEdit',
@@ -141,7 +143,12 @@ function renderBar(current, onProjectChange) {
   if (!bar) return;
 
   const can = session.permissions;
-  const links = SCREENS.filter((screen) => can[screen.need]);
+  // A screen may serve more than one job — Review is where a planner and a
+  // material manager each do theirs — so `need` can be a list, and any one of
+  // them opens it.
+  const links = SCREENS.filter((screen) => (Array.isArray(screen.need)
+    ? screen.need.some((permission) => can[permission])
+    : can[screen.need]));
 
   const projectPicker = session.projects.length
     ? `<label class="project">

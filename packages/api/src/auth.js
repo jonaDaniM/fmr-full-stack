@@ -146,7 +146,9 @@ export async function membershipsFor(userId) {
       search: row.can_search,
       fieldTransact: row.can_field_transact,
       adminBackorder: row.can_admin_backorder,
-      ownerEdit: row.can_owner_edit
+      ownerEdit: row.can_owner_edit,
+      planReview: row.can_plan_review,
+      assignNumber: row.can_assign_number
     }
   }));
 }
@@ -257,6 +259,7 @@ export async function authenticate(req) {
     `SELECT u.*,
             m.can_search, m.can_field_transact,
             m.can_admin_backorder, m.can_owner_edit,
+            m.can_plan_review, m.can_assign_number,
             m.project_id,
             EXISTS (SELECT 1 FROM revoked_sessions r WHERE r.sid = $3) AS revoked
        FROM users u
@@ -278,7 +281,9 @@ export async function authenticate(req) {
       search: row.can_search,
       fieldTransact: row.can_field_transact,
       adminBackorder: row.can_admin_backorder,
-      ownerEdit: row.can_owner_edit
+      ownerEdit: row.can_owner_edit,
+      planReview: row.can_plan_review,
+      assignNumber: row.can_assign_number
     }
   };
 }

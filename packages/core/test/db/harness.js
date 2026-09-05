@@ -66,7 +66,9 @@ export async function connect() {
     corrections: await import('../../src/services/corrections.js'),
     integrity: await import('../../src/services/integrity.js'),
     reporting: await import('../../src/services/reporting.js'),
-    drafts: await import('../../../import/src/drafts.js')
+    drafts: await import('../../../import/src/drafts.js'),
+    workflow: await import('../../../import/src/workflow.js'),
+    staging: await import('../../../import/src/staging.js')
   };
   return services;
 }
@@ -91,8 +93,9 @@ export async function fixture({ requested = 100 } = {}) {
 
   await pool.query(
     `INSERT INTO project_members (project_id,user_id,role,can_search,can_field_transact,
-                                  can_admin_backorder,can_owner_edit)
-     VALUES ($1,$2,'OWNER',true,true,true,true)`, [projectId, userId]);
+                                  can_admin_backorder,can_owner_edit,
+                                  can_plan_review,can_assign_number)
+     VALUES ($1,$2,'OWNER',true,true,true,true,true,true)`, [projectId, userId]);
 
   const fmrId = (await pool.query(
     `INSERT INTO fmr_headers (project_id,fmr_number,current_status)
@@ -105,7 +108,17 @@ export async function fixture({ requested = 100 } = {}) {
      RETURNING id`, [projectId, fmrId, requested])).rows[0].id;
 
   const user = { id: userId, email: 'crew@test', display_name: 'Crew Hand' };
-  return { projectId, userId, fmrId, lineId, user, ctx: { user, projectId } };
+  // The fixture's member is an OWNER, so the ctx carries an owner's
+  // permissions — the services read these, not the row.
+  const permissions = {
+    search: true, fieldTransact: true, adminBackorder: true, ownerEdit: true,
+    planReview: true, assignNumber: true
+  };
+
+  return {
+    projectId, userId, fmrId, lineId, user,
+    ctx: { user, projectId, permissions }
+  };
 }
 
 /** A second FMR in the same project, with one line. */

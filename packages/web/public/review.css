@@ -1,0 +1,47 @@
+/*
+ * The review queue.
+ *
+ * One card per requisition waiting on a decision. Deliberately plainer than
+ * the office queues: there are two buttons and a note, and the work is
+ * reading the request rather than scanning a table.
+ */
+
+.review-card {
+  padding: var(--s-4) var(--s-5);
+  margin-bottom: var(--s-3);
+  background: var(--card);
+  border: 1px solid var(--rule); border-radius: var(--r-lg);
+}
+
+.review-head {
+  display: flex; align-items: flex-start; gap: var(--s-3);
+  margin-bottom: var(--s-3);
+}
+.review-head h3 {
+  font-family: var(--font-mono); font-size: var(--t-md);
+  margin-bottom: var(--s-1);
+}
+.review-head p { font-size: var(--t-sm); }
+
+/* The state pushes to the right edge and stays on one line. */
+.pill-state { margin-left: auto; flex: 0 0 auto; }
+
+/* What the planner said. It is the reason the card is back, so it reads as
+   content rather than as metadata. */
+.review-note {
+  padding: var(--s-3) var(--s-4); margin-bottom: var(--s-3);
+  font-size: var(--t-sm);
+  background: var(--accent-soft); color: var(--ink);
+  border-left: 3px solid var(--accent); border-radius: var(--r-sm);
+}
+.review-trail { font-size: var(--t-sm); margin-bottom: var(--s-3); }
+
+.review-actions {
+  display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-2);
+}
+
+@media (max-width: 520px) {
+  .review-head { flex-wrap: wrap; }
+  .pill-state { margin-left: 0; }
+  .review-actions .btn { flex: 1 1 auto; }
+}

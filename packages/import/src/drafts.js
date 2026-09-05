@@ -75,7 +75,7 @@ async function recordIssues(client, batchId, itemId, draft, { requireFmrNumber =
 }
 
 /** Read a draft back in the shape the validator expects. */
-async function loadDraft(client, itemId) {
+export async function loadDraft(client, itemId) {
   const { rows: items } = await client.query(
     'SELECT * FROM import_items WHERE id = $1',
     [itemId]

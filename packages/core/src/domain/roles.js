@@ -16,7 +16,8 @@ export const ROLE_PROFILES = Object.freeze({
     label: 'Read Only',
     description: 'Can look material up, but not record anything.',
     permissions: Object.freeze({
-      search: true, fieldTransact: false, adminBackorder: false, ownerEdit: false
+      search: true, fieldTransact: false, adminBackorder: false, ownerEdit: false,
+      planReview: false, assignNumber: false
     })
   }),
 
@@ -25,16 +26,28 @@ export const ROLE_PROFILES = Object.freeze({
     label: 'Field User',
     description: 'Locates, bags and issues material, and raises backorders.',
     permissions: Object.freeze({
-      search: true, fieldTransact: true, adminBackorder: false, ownerEdit: false
+      search: true, fieldTransact: true, adminBackorder: false, ownerEdit: false,
+      planReview: false, assignNumber: false
+    })
+  }),
+
+  PLANNER: Object.freeze({
+    key: 'PLANNER',
+    label: 'Planner',
+    description: 'Reviews a requisition against the work package, and returns what does not suit it.',
+    permissions: Object.freeze({
+      search: true, fieldTransact: false, adminBackorder: false, ownerEdit: false,
+      planReview: true, assignNumber: false
     })
   }),
 
   ADMIN: Object.freeze({
     key: 'ADMIN',
     label: 'Material Admin',
-    description: 'Decides backorders from the office. Does not move material.',
+    description: 'Decides backorders, and owns the official FMR number.',
     permissions: Object.freeze({
-      search: true, fieldTransact: false, adminBackorder: true, ownerEdit: false
+      search: true, fieldTransact: false, adminBackorder: true, ownerEdit: false,
+      planReview: false, assignNumber: true
     })
   }),
 
@@ -43,7 +56,8 @@ export const ROLE_PROFILES = Object.freeze({
     label: 'System Owner',
     description: 'Everything, plus users, drafts, corrections and controls.',
     permissions: Object.freeze({
-      search: true, fieldTransact: true, adminBackorder: true, ownerEdit: true
+      search: true, fieldTransact: true, adminBackorder: true, ownerEdit: true,
+      planReview: true, assignNumber: true
     })
   })
 });
@@ -86,7 +100,9 @@ export function profileFromPermissions(permissions) {
     search: !!permissions?.search,
     fieldTransact: !!permissions?.fieldTransact,
     adminBackorder: !!permissions?.adminBackorder,
-    ownerEdit: !!permissions?.ownerEdit
+    ownerEdit: !!permissions?.ownerEdit,
+    planReview: !!permissions?.planReview,
+    assignNumber: !!permissions?.assignNumber
   };
 
   for (const profile of Object.values(ROLE_PROFILES)) {
@@ -94,7 +110,9 @@ export function profileFromPermissions(permissions) {
     if (p.search === given.search
       && p.fieldTransact === given.fieldTransact
       && p.adminBackorder === given.adminBackorder
-      && p.ownerEdit === given.ownerEdit) {
+      && p.ownerEdit === given.ownerEdit
+      && p.planReview === given.planReview
+      && p.assignNumber === given.assignNumber) {
       return profile.key;
     }
   }

@@ -9,6 +9,7 @@
 import { withTransaction } from '../../core/src/db/pool.js';
 import { extractWorkbook, SEVERITY } from './extract.js';
 import { LedgerError } from '../../core/src/domain/ledger.js';
+import { STATES, STATE_LABELS } from '../../core/src/domain/workflow.js';
 
 /** Parse a workbook and stage it for review. */
 export async function stageWorkbook(ctx, { sheets, sourceName, profile, profileName,
@@ -317,6 +318,22 @@ export async function publishBatch(ctx, { batchId, itemIds }) {
       itemIds?.length ? [batchId, projectId, itemIds] : [batchId, projectId]
     );
 
+    // Publishing is the field-execution gate, not a status change: it is the
+    // moment a crew can be sent looking for this material. So it happens only
+    // once the planner has approved the request and the material manager has
+    // given it its official number.
+    const notReady = items.filter((item) => item.workflow_state !== STATES.NUMBER_ASSIGNED);
+    if (notReady.length) {
+      const first = notReady[0];
+      throw new LedgerError(
+        `${first.fmr_number || 'One of these FMRs'} is `
+        + `${describeState(first.workflow_state)}. `
+        + 'An FMR reaches the field once the planner has approved it and it has been '
+        + 'given its number.',
+        'NOT_APPROVED'
+      );
+    }
+
     const published = [];
 
     for (const item of items) {
@@ -354,8 +371,11 @@ export async function publishBatch(ctx, { batchId, itemIds }) {
       }
 
       await client.query(
-        `UPDATE import_items SET published_fmr_id = $2, status = 'Published' WHERE id = $1`,
-        [item.id, fmrId]
+        `UPDATE import_items
+            SET published_fmr_id = $2, status = 'Published',
+                workflow_state = $3
+          WHERE id = $1`,
+        [item.id, fmrId, STATES.PUBLISHED]
       );
 
       await client.query(
@@ -396,6 +416,22 @@ function parseDate(value) {
   if (!value) return null;
   const parsed = new Date(value);
   return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString().slice(0, 10);
+}
+
+/**
+ * Where a requisition sits, in a sentence.
+ *
+ * "is draft" reads as a typo; "is still a draft" reads as an answer.
+ */
+function describeState(state) {
+  const said = {
+    DRAFT: 'still a draft',
+    PENDING_PLANNER_REVIEW: 'still with the planner',
+    PLANNER_APPROVED: 'approved but not yet numbered',
+    PLANNER_RETURNED: 'been returned for correction',
+    PENDING_MATERIAL_MANAGER: 'waiting for its number'
+  };
+  return said[state] ?? (STATE_LABELS[state] ?? state).toLowerCase();
 }
 
 /**
