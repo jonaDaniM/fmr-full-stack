@@ -56,7 +56,8 @@ export async function listMembers(client, projectId) {
             u.deactivated_at, u.deactivated_reason,
             d.display_name AS deactivated_by_name,
             m.role, m.can_search, m.can_field_transact,
-            m.can_admin_backorder, m.can_owner_edit, m.created_at
+            m.can_admin_backorder, m.can_owner_edit,
+            m.can_plan_review, m.can_assign_number, m.created_at
        FROM project_members m
        JOIN users u ON u.id = m.user_id
        LEFT JOIN users d ON d.id = u.deactivated_by
@@ -72,7 +73,9 @@ export async function listMembers(client, projectId) {
         search: row.can_search,
         fieldTransact: row.can_field_transact,
         adminBackorder: row.can_admin_backorder,
-        ownerEdit: row.can_owner_edit
+        ownerEdit: row.can_owner_edit,
+        planReview: row.can_plan_review,
+        assignNumber: row.can_assign_number
       };
 
       return {
@@ -148,19 +151,22 @@ export async function saveMember(ctx, { email, name, profile }) {
     const { rows } = await client.query(
       `INSERT INTO project_members
          (project_id, user_id, role, can_search, can_field_transact,
-          can_admin_backorder, can_owner_edit)
-       VALUES ($1,$2,$3,$4,$5,$6,$7)
+          can_admin_backorder, can_owner_edit, can_plan_review, can_assign_number)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
        ON CONFLICT (project_id, user_id) DO UPDATE SET
          role = EXCLUDED.role,
          can_search = EXCLUDED.can_search,
          can_field_transact = EXCLUDED.can_field_transact,
          can_admin_backorder = EXCLUDED.can_admin_backorder,
-         can_owner_edit = EXCLUDED.can_owner_edit
+         can_owner_edit = EXCLUDED.can_owner_edit,
+         can_plan_review = EXCLUDED.can_plan_review,
+         can_assign_number = EXCLUDED.can_assign_number
        RETURNING *`,
       [
         projectId, member.id, String(profile).toUpperCase(),
         permissions.search, permissions.fieldTransact,
-        permissions.adminBackorder, permissions.ownerEdit
+        permissions.adminBackorder, permissions.ownerEdit,
+        permissions.planReview, permissions.assignNumber
       ]
     );
 
