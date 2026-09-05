@@ -313,6 +313,26 @@ In the office, **Line swaps** beside Backorders and Active bags:
       shelf — the crew still has to locate it
 - [ ] The line's History shows the borrow on both lines
 
+## 27. Tuning a workbook layout
+
+Needs a workbook whose column headings differ from the baseline — for example
+`Mark`, `Stock Code`, `NPD`, `Nomenclature`, `Req'd Qty`, `U/M`.
+
+- [ ] The import screen shows a **Workbook layout** picker and **Tune it**
+- [ ] Uploading the workbook under **Tune it** imports nothing
+- [ ] The screen names the row the headings were found on
+- [ ] Headings the reader knows are listed as recognised
+- [ ] It says plainly when nothing is mapped to description or quantity
+- [ ] Each unfamiliar heading has a dropdown, pre-filled with a sensible guess
+      (`Req'd Qty` → quantity, `Nomenclature` → description, `NPD` → size)
+- [ ] A heading can be left out
+- [ ] Saving without a name is refused
+- [ ] After saving, the layout appears in the picker marked *(this project)*
+- [ ] Importing the same workbook with that layout now produces its lines
+- [ ] The layout is still selected after a reload
+- [ ] Saving under an existing name replaces it rather than making a second
+- [ ] A layout saved on one project does not appear on another
+
 ---
 
 ## Sign-off

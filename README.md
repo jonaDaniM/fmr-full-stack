@@ -362,12 +362,28 @@ shelf — the crew locates the material when it physically arrives.
 persistence. Both lines are locked lowest-id-first, so two crews borrowing from
 each other at the same moment cannot deadlock.
 
+## Import profiles
+
+The reader has no per-project logic. Everything that varies between projects is
+a list of column headings, held in a profile.
+
+The files in `packages/import/profiles/` are the baselines. Anything a person
+tunes is a row in `import_profiles`, keyed to a project — the deployment's
+filesystem does not survive a deploy, so a profile saved through the screen
+could not live there. A project's profile shadows a built-in of the same name.
+
+`profileFit.js` is what makes tuning possible: the parser matches headings
+exactly, so an unrecognised one fails silently. `fitReport` turns that into
+what matched, what did not, and what each unplaced heading probably is.
+Suggestions are shown to a person and never applied on their own — the exact
+heading is recorded once confirmed, so the next import matches outright.
+
+Watch for aliases that are only punctuation. The baseline maps `#` to the item
+number, which squashes to an empty string and once matched every blank cell in
+the sheet, so a two-cell header block outscored the real heading row.
+
 ## Not yet built
 
-- **A profile editor.** The engine already takes the profile as data and
-  `/api/import/stage` already accepts `?profile=<name>`, but nothing in the UI
-  ever sets it, so every import runs on `default.json`. What is missing is the
-  screen to choose and edit one, not the plumbing under it.
 - The Python FMR generator (`industrial-iso-takeoff-toolkit`) wired into the UI
 - Per-project extraction profiles beyond the baseline — these need real
   drawings from each project to tune

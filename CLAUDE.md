@@ -13,8 +13,8 @@ those backorders. The ledger of who has what is the whole point of the system.
 brew services start postgresql@17   # once
 npm start                           # http://localhost:3000
 npm run start:reset                 # wipe and start fresh
-npm test                            # 324 tests + the web and SQL checks
-npm run test:db                     # 55 more, against a real Postgres
+npm test                            # 343 tests + the web and SQL checks
+npm run test:db                     # 64 more, against a real Postgres
 ```
 
 Sign in by picking a seeded user. Jonathan D. is an owner and sees everything.
@@ -131,6 +131,9 @@ lending reduces the donor's located **and** available totals and never touches
 each other deadlock). Recording a repayment settles the obligation only — it
 must not credit the donor's shelf.
 
-What the client has asked for and is not built: a way to tune the drawing
-parser for a new project without editing a profile by hand, and automatic
-matching of incoming deliveries to open swaps.
+Migration `013` moves import profiles into the database, per project, and adds
+the tuning screen. The files in `packages/import/profiles/` stay as baselines.
+
+What the client has asked for and is not built: automatic matching of incoming
+deliveries to open swaps, and learning a layout from a file already imported
+correctly.

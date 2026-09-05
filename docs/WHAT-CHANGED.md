@@ -172,11 +172,48 @@ risky part — the earlier Materials Tracker let one incoming quantity satisfy
 several swaps at full value. Repayment here is explicit and can never exceed
 what a swap actually owes.
 
+### 5. Tuning the parser for a new project
+
+> *BOM is fairly similar in most projects. How will we fine tune the parser in
+> new projects? Will I have to code the logic on the backend, or is there a way
+> we can have the user input some examples to train the new parser.*
+
+**No backend code.** The reader has no per-project logic in it — everything
+that varies between projects is a list of column headings. What was missing
+was a way for you to change that list without us.
+
+On the Import screen there is now a **Workbook layout** picker and a **Tune
+it** button. Tuning works from one of your own files:
+
+1. Upload a workbook from the new project. Nothing is imported.
+2. The screen reports what it recognised and what it did not, sheet by sheet —
+   including which required columns are missing and what an import would do.
+3. Each unfamiliar heading gets a dropdown, **pre-filled with what it most
+   likely holds**. `Req'd Qty` is offered as the quantity, `Nomenclature` as
+   the description, `NPD` as the size.
+4. Confirm or correct those, name the layout, save it.
+
+The next import uses it. Tested on a workbook whose headings were `Mark`,
+`Stock Code`, `NPD`, `Nomenclature`, `Req'd Qty` and `U/M` — none of which the
+baseline knows: **before tuning it produced 0 lines and an error; after, 3 of
+3 lines with every column in the right place.**
+
+This is closer to your "input some examples" than to coding, with one
+deliberate difference: the system **suggests** but never applies a mapping on
+its own. You confirm it. A reader that quietly decides `QTY ORDERED` is the
+requested quantity will eventually decide wrong, and a wrong quantity sends a
+crew looking for material nobody asked for. Once you confirm, the exact
+heading is recorded, so it is an exact match from then on rather than a guess
+repeated.
+
+Layouts belong to a project, so tuning one for a new job cannot disturb an
+existing one.
+
 ---
 
 ## What we found while checking
 
-### 5. The numbering error that started all this
+### 6. The numbering error that started all this
 
 This is the important one.
 
@@ -194,7 +231,7 @@ is advice that could not work. Now:
 the system had no concept of FMR numbering, and like it was blocking a second
 FMR on the same drawing. Neither was true — which brings us to the next part.
 
-### 6. A package that could not be read now says what it held
+### 7. A package that could not be read now says what it held
 
 Your `newFmr36` upload. We ran that exact file: it reads correctly — 26
 drawings, the first on page 17, exactly as you noted. Pages 1–16 are a cover,
@@ -216,7 +253,7 @@ about are highlighted in the review table with the reason, and pages it sets
 aside are reported on the batch. What was missing was only the all-or-nothing
 case above.
 
-### 7. Removing everything no longer blames the file
+### 8. Removing everything no longer blames the file
 
 After removing the last FMR from a batch, the screen said *"No FMRs were found
 in that file. Check it is the right one"* — about a file that read perfectly,
@@ -226,7 +263,7 @@ still showed the batch as staged.
 Found by clicking the buttons rather than testing the endpoints. The rules were
 right in both cases; only the screen was wrong.
 
-### 8. Roles were being downgraded on the way out of the database
+### 9. Roles were being downgraded on the way out of the database
 
 While testing the new roles: a Planner saved correctly but **read back as Read
 Only**, and a Material Admin as a custom permission set. Saving such a person
@@ -247,7 +284,7 @@ permission set has been quietly downgraded on the way out.
 It never did. The duplicate check matches on **FMR number only** — never on the
 drawing. Your example works today: pipe and field welds now, valves and gaskets
 months later, same drawing, different numbers, both publish. What you hit was
-the numbering error in point 5.
+the numbering error in point 6.
 
 **The FMR number is shown in Drafts and in the Register.** It is the first
 column of the register, in bold, and the heading of every card in Drafts. If
@@ -265,37 +302,10 @@ sequence instead, that is a decision to make deliberately rather than a bug.
 
 ## Still open
 
-**Tuning the parser for a new project.** You asked whether you would have to
-code the logic on the backend, or whether a user could input examples instead.
-
-Neither, today — and the good news is the harder half is already done. **The
-parser has no per-project logic in it.** Everything that varies between
-projects is a small file of column names:
-
-```
-"quantity":    ["Qty", "Quantity", "Qty Req", "Qty Required", "Req Qty"],
-"size":        ["Size", "NPS", "DN", "Dia", "Diameter"],
-"description": ["Description", "Material Description", "Material", "Desc"],
-```
-
-A new project whose sheets say `REQ'D QTY` instead of `Qty` is one line in that
-file — no backend code, no logic, no deployment of the parser itself. The
-import screen already tells you which one it used, and the system already
-accepts being told to use a different one per import.
-
-**What is missing is only the screen.** Adding a project still means one of us
-putting that file on the server. Two ways forward, and the choice is yours:
-
-- **A profile editor** — you upload a sample sheet, the screen shows what it
-  read from each column and lets you correct the headings it guessed wrong.
-  This is a modest piece of work, because the file it produces already has a
-  home and the engine that reads it already exists.
-- **Learning from examples**, as you suggested — the same screen, but it
-  proposes the mapping from a sheet you have already imported correctly.
-  Slightly more work, and worth doing only after the first version proves
-  what people actually get wrong.
-
-I would build the first and see whether the second is still needed.
+**Automatic matching of incoming deliveries to open line swaps**, and
+learning a workbook layout from a file you have already imported
+correctly — both worth doing once the first versions have proved out
+what people actually get wrong.
 
 **FMR 209 line 9** still has the duplicate backorder from the old system, three
 seconds apart. Needs your decision before anything is removed.
@@ -308,7 +318,7 @@ Not by reading the code. Every change above was driven through a real browser:
 signed in by clicking a name, navigated by clicking the menu, files chosen
 through the file picker, buttons clicked where they actually sit on screen.
 
-That is what found points 7 and 8 — in both cases the server was correct and
+That is what found points 8 and 9 — in both cases the server was correct and
 only the screen was wrong, which no amount of testing the server would have
 shown.
 
