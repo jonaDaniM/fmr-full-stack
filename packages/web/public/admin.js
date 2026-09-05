@@ -10,7 +10,7 @@ import { api, idempotencyKey } from './lib/api.js';
 import { $, esc, n, day, skeleton, emptyRow } from './lib/dom.js';
 import { dialog, confirmAction } from './lib/modal.js';
 import { toast, toastError } from './lib/toast.js';
-import { initShell } from './lib/shell.js';
+import { initShell, session } from './lib/shell.js';
 
 const REGISTER_DEFAULTS = Object.freeze({
   query: '', queryType: 'AUTO', status: '', priority: '',
@@ -471,7 +471,9 @@ const renderRegisterRow = (f) => `
     </td>
     <td><div class="rowacts">
       <button type="button" class="btn btn-sm" data-open="${esc(f.id)}">Open</button>
-      <button type="button" class="btn btn-sm" data-renumber="${esc(f.id)}">Renumber</button>
+      ${session.can('ownerEdit')
+        ? `<button type="button" class="btn btn-sm" data-renumber="${esc(f.id)}">Renumber</button>`
+        : ''}
     </div></td>
   </tr>`;
 

@@ -61,7 +61,7 @@ import {
   startJob, runJob, getJob, failAbandonedJobs
 } from '../../import/src/extractionJobs.js';
 import {
-  authenticate, require as requirePermission, verifyGoogleToken,
+  authenticate, require as requirePermission, requireAny, verifyGoogleToken,
   findUser, recordLogin, issueSession, readSession, membershipsFor,
   revokeSession, auditAuth, AuthError
 } from './auth.js';
@@ -948,7 +948,11 @@ route('DELETE', /^\/api\/import\/item$/, async (req, res) => {
 
 route('POST', /^\/api\/import\/publish$/, async (req, res) => {
   const ctx = await authenticate(req);
-  requirePermission(ctx, 'ownerEdit');
+  // An owner publishes a whole batch from Import; a material manager releases
+  // a numbered requisition from Review. The workflow already grants PUBLISH to
+  // assignNumber, so demanding ownerEdit here gave that person a button that
+  // could only ever answer 403.
+  requireAny(ctx, ['ownerEdit', 'assignNumber']);
 
   const body = await readBody(req);
   const result = await once(

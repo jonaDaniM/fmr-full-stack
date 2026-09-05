@@ -11,7 +11,7 @@
  * rather than deciding again in the browser.
  */
 
-import { api } from './lib/api.js';
+import { api, idempotencyKey } from './lib/api.js';
 import { $, esc } from './lib/dom.js';
 import { askReason, confirmAction, dialog } from './lib/modal.js';
 import { toast, toastError } from './lib/toast.js';
@@ -169,6 +169,28 @@ $('view').addEventListener('click', async (event) => {
         confirmLabel: 'Approve'
       });
       if (!sure) return;
+    }
+
+    // Publishing is not a state change. It creates the FMR, its lines and its
+    // ledger — /api/review/advance would only move workflow_state, leaving an
+    // item marked published that no crew can search for.
+    if (action === 'PUBLISH') {
+      const sure = await confirmAction({
+        title: `Publish ${item.fmrNumber ?? 'this requisition'}?`,
+        lede: `${item.isoNumber ?? ''}${item.isoSheet ? ` sht ${item.isoSheet}` : ''}`,
+        body: 'The crew can search for it and start pulling material '
+          + 'immediately. Publishing cannot be undone.',
+        confirmLabel: 'Publish'
+      });
+      if (!sure) return;
+
+      const result = await api('/api/import/publish', {
+        method: 'POST',
+        headers: { 'idempotency-key': idempotencyKey() },
+        body: JSON.stringify({ batchId: item.batchId, itemIds: [itemId] })
+      });
+      toast(`Published ${result.count} FMR${result.count === 1 ? '' : 's'}.`);
+      return void await load();
     }
 
     await api('/api/review/advance', {

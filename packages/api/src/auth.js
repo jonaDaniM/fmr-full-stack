@@ -294,3 +294,16 @@ export function require(ctx, capability) {
     throw new AuthError('You do not have permission to do that.', 403);
   }
 }
+
+/**
+ * Allow the act if the caller holds any one of these.
+ *
+ * Publishing is the case this exists for: an owner may publish a batch from
+ * the import screen, and a material manager releases a numbered requisition
+ * from the review queue. Both are the same act on the same route.
+ */
+export function requireAny(ctx, capabilities) {
+  if (!capabilities.some((capability) => ctx.permissions[capability])) {
+    throw new AuthError('You do not have permission to do that.', 403);
+  }
+}

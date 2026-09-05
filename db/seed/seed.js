@@ -13,15 +13,21 @@ const PROJECTS = [
   { code: 'MW-2026', name: 'Midwest Expansion' }
 ];
 
+// search, fieldTransact, adminBackorder, ownerEdit, planReview, assignNumber.
+// All six, in the order the INSERT below lists them — a role missing the last
+// two cannot reach the review queue at all, which is how a seeded owner ended
+// up unable to approve anything.
 const USERS = [
   { email: 'jonathan@example.com', name: 'Jonathan D.', role: 'Owner',
-    perms: [true, true, true, true] },
+    perms: [true, true, true, true, true, true] },
   { email: 'warehouse@example.com', name: 'Rita Alvarez', role: 'Warehouse',
-    perms: [true, true, false, false] },
+    perms: [true, true, false, false, false, false] },
   { email: 'expeditor@example.com', name: 'Sam Okafor', role: 'Expeditor',
-    perms: [true, false, true, false] },
+    perms: [true, false, true, false, false, true] },
   { email: 'foreman@example.com', name: 'Dale Hughes', role: 'Field',
-    perms: [true, true, false, false] }
+    perms: [true, true, false, false, false, false] },
+  { email: 'planner@example.com', name: 'Priya Raman', role: 'Planner',
+    perms: [true, false, false, false, true, false] }
 ];
 
 const LINES = [
@@ -68,9 +74,13 @@ async function seed() {
         await pool.query(
           `INSERT INTO project_members
              (project_id, user_id, role, can_search, can_field_transact,
-              can_admin_backorder, can_owner_edit)
-           VALUES ($1,$2,$3,$4,$5,$6,$7)
-           ON CONFLICT (project_id, user_id) DO UPDATE SET role = EXCLUDED.role`,
+              can_admin_backorder, can_owner_edit, can_plan_review,
+              can_assign_number)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+           ON CONFLICT (project_id, user_id) DO UPDATE SET
+             role               = EXCLUDED.role,
+             can_plan_review    = EXCLUDED.can_plan_review,
+             can_assign_number  = EXCLUDED.can_assign_number`,
           [projectId, rows[0].id, u.role, ...u.perms]
         );
       }
