@@ -61,6 +61,9 @@ import {
   startJob, runJob, getJob, failAbandonedJobs
 } from '../../import/src/extractionJobs.js';
 import {
+  bucket as uploadBucket, objectNameFor, uploadUrl, assertOwnedBy
+} from '../../import/src/objectStore.js';
+import {
   authenticate, require as requirePermission, requireAny, verifyGoogleToken,
   findUser, recordLogin, issueSession, readSession, membershipsFor,
   revokeSession, auditAuth, AuthError
@@ -730,12 +733,56 @@ route('POST', /^\/api\/import\/extracted$/, async (req, res, { url }) => {
 });
 
 /**
+ * Somewhere to put a package too big to send through this server.
+ *
+ * Cloud Run refuses a request body over 32MB at the front end, before the
+ * container sees it — so a 40MB package failed with nothing in the logs and
+ * "Something went wrong." on screen. The browser asks here first, uploads the
+ * bytes straight to Cloud Storage, and sends back only the object names.
+ *
+ * Answers 404 where there is no bucket, which is every local run: the browser
+ * reads that as "upload it directly" and does, because locally there is no
+ * front end and no limit to work around.
+ */
+route('POST', /^\/api\/import\/uploads$/, async (req, res) => {
+  const ctx = await authenticate(req);
+  requirePermission(ctx, 'ownerEdit');
+
+  if (!uploadBucket()) return json(res, 404, { error: 'Direct upload is not configured.' });
+
+  const { files } = await readBody(req);
+  if (!Array.isArray(files) || !files.length) {
+    throw new LedgerError('No drawings were named.', 'NO_FILE');
+  }
+  if (files.length > 200) {
+    throw new LedgerError('That is more drawings than one package can hold.', 'TOO_MANY');
+  }
+
+  // One signature per file, and they are independent, so they are asked for
+  // together rather than one round trip at a time.
+  const uploads = await Promise.all(files.map(async (file) => {
+    const objectName = objectNameFor(ctx.projectId, file?.name);
+    return {
+      name: file?.name ?? null,
+      objectName,
+      // Signed into the URL, so the browser must send exactly this back.
+      contentType: 'application/pdf',
+      url: await uploadUrl(objectName, 'application/pdf')
+    };
+  }));
+
+  json(res, 200, { uploads });
+});
+
+/**
  * Read a package of drawing PDFs and stage what it holds.
  *
- * The files arrive as one body, each framed by its length, because there is no
- * multipart parser here and a package is several drawings at once. Reading
- * them takes longer than a request should be held open, so the work is
- * recorded and started, and the browser is given a job to poll.
+ * The files arrive one of two ways. Small packages come as one body, each file
+ * framed by its length, because there is no multipart parser here. Large ones
+ * are already in Cloud Storage and arrive as a list of object names — see
+ * /api/import/uploads for why. Either way the reading takes longer than a
+ * request should be held open, so the work is recorded and started, and the
+ * browser is given a job to poll.
  */
 route('POST', /^\/api\/import\/drawings$/, async (req, res, { url }) => {
   const ctx = await authenticate(req);
@@ -748,35 +795,56 @@ route('POST', /^\/api\/import\/drawings$/, async (req, res, { url }) => {
     client.release();
   }
 
-  const chunks = [];
-  let size = 0;
-  for await (const chunk of req) {
-    size += chunk.length;
-    // A package of drawings is bigger than a workbook: 20 real ISO sheets run
-    // to about 10 MB, and packages vary.
-    if (size > 100_000_000) {
-      throw new LedgerError('That package is too large.', 'TOO_LARGE');
+  // A package already in Cloud Storage arrives as names, not bytes. The
+  // objects are not downloaded here: that would hold the request open for the
+  // whole read, which is the thing the job exists to avoid.
+  const uploaded = /^application\/json/.test(req.headers['content-type'] ?? '');
+
+  let files = null;
+  let objects = null;
+
+  if (uploaded) {
+    const body = await readBody(req);
+    objects = Array.isArray(body.objects) ? body.objects : [];
+    if (!objects.length) throw new LedgerError('No drawings were uploaded.', 'NO_FILE');
+    // A name the browser sends back is not proof of anything. Every one must
+    // sit under this project's prefix or it is not this project's to read.
+    for (const objectName of objects) assertOwnedBy(objectName, ctx.projectId);
+  } else {
+    const chunks = [];
+    let size = 0;
+    for await (const chunk of req) {
+      size += chunk.length;
+      // Cloud Run's front end refuses a body over 32MB before it reaches this
+      // container, so a larger figure here would be a promise this server
+      // cannot keep. Anything bigger goes through /api/import/uploads.
+      if (size > 30_000_000) {
+        throw new LedgerError(
+          'That package is too large to send directly. Reload the page and try '
+          + 'again — it will upload in a way that has no size limit.',
+          'TOO_LARGE'
+        );
+      }
+      chunks.push(chunk);
     }
-    chunks.push(chunk);
+    if (!size) throw new LedgerError('No drawings were uploaded.', 'NO_FILE');
+
+    files = unframeFiles(Buffer.concat(chunks));
+    if (!files.length) throw new LedgerError('No drawings were uploaded.', 'NO_FILE');
   }
-  if (!size) throw new LedgerError('No drawings were uploaded.', 'NO_FILE');
 
-  const files = unframeFiles(Buffer.concat(chunks));
-  if (!files.length) throw new LedgerError('No drawings were uploaded.', 'NO_FILE');
-
+  const count = files ? files.length : objects.length;
   const iwpNumber = (url.searchParams.get('iwp') ?? '').trim();
   const sourceName = url.searchParams.get('filename')
-    ?? `${files.length} drawing${files.length === 1 ? '' : 's'}`;
+    ?? `${count} drawing${count === 1 ? '' : 's'}`;
 
-  const jobId = await startJob(ctx, {
-    sourceName, fileCount: files.length, iwpNumber
-  });
+  const jobId = await startJob(ctx, { sourceName, fileCount: count, iwpNumber });
 
   // Deliberately not awaited: the answer is the job id, and the reading
   // carries on behind it. runJob records its own failures and never rejects.
-  runJob(ctx, jobId, files, { iwpNumber, sourceName });
+  runJob(ctx, jobId, files, { iwpNumber, sourceName, objects });
 
-  json(res, 202, { jobId, fileCount: files.length });
+  json(res, 202, { jobId, fileCount: count });
 });
 
 /**

@@ -58,7 +58,8 @@ if [[ "${1:-}" == "setup" ]]; then
   say "Enabling the services this needs"
   gcloud services enable \
     run.googleapis.com sqladmin.googleapis.com cloudbuild.googleapis.com \
-    secretmanager.googleapis.com artifactregistry.googleapis.com
+    secretmanager.googleapis.com artifactregistry.googleapis.com \
+    storage.googleapis.com iamcredentials.googleapis.com
 
   if gcloud sql instances describe "$DB_INSTANCE" >/dev/null 2>&1; then
     say "Database instance ${DB_INSTANCE} is already there"
@@ -74,6 +75,8 @@ if [[ "${1:-}" == "setup" ]]; then
     || gcloud sql databases create "$DB_NAME" --instance="$DB_INSTANCE"
 
   # The application user, with a password nobody ever types or sees.
+  NUMBER="$(gcloud projects describe "$PROJECT" --format='value(projectNumber)')"
+
   if ! gcloud secrets describe fmr-db-password >/dev/null 2>&1; then
     say "Creating the database user"
     DB_PASSWORD="$(openssl rand -base64 32 | tr -d '/+=' | head -c 32)"
@@ -88,12 +91,49 @@ if [[ "${1:-}" == "setup" ]]; then
        | gcloud secrets create fmr-session-secret --data-file=-
 
   # Cloud Run's service account has to be able to read both.
-  NUMBER="$(gcloud projects describe "$PROJECT" --format='value(projectNumber)')"
   for SECRET in fmr-db-password fmr-session-secret; do
     gcloud secrets add-iam-policy-binding "$SECRET" \
       --member="serviceAccount:${NUMBER}-compute@developer.gserviceaccount.com" \
       --role=roles/secretmanager.secretAccessor >/dev/null
   done
+
+
+  # Drawings too big to send through the app.
+  #
+  # Cloud Run's front end refuses any request body over 32MB, before the
+  # container sees it — so a 40MB package failed with nothing in the logs. The
+  # browser uploads those straight here instead, with a signed URL, and the app
+  # is told only the object name.
+  BUCKET="${PROJECT}-fmr-uploads"
+  if gcloud storage buckets describe "gs://${BUCKET}" >/dev/null 2>&1; then
+    say "Upload bucket ${BUCKET} is already there"
+  else
+    say "Creating the upload bucket"
+    gcloud storage buckets create "gs://${BUCKET}" \
+      --location="$REGION" --uniform-bucket-level-access
+  fi
+
+  # An upload is read within the minute and deleted by the job that reads it.
+  # This is the backstop: nothing a failed run left behind outlives a day, and
+  # these are the client's drawings.
+  printf '%s' '{"rule":[{"action":{"type":"Delete"},"condition":{"age":1}}]}' \
+    > /tmp/fmr-lifecycle.json
+  gcloud storage buckets update "gs://${BUCKET}" \
+    --lifecycle-file=/tmp/fmr-lifecycle.json >/dev/null
+  rm -f /tmp/fmr-lifecycle.json
+
+  # The service account reads what was uploaded and deletes it afterwards.
+  gcloud storage buckets add-iam-policy-binding "gs://${BUCKET}" \
+    --member="serviceAccount:${NUMBER}-compute@developer.gserviceaccount.com" \
+    --role=roles/storage.objectAdmin >/dev/null
+
+  # Signing a URL means signing as itself, which is a permission it does not
+  # have by default. Without this the app falls back to direct upload and large
+  # packages fail the way they did before.
+  gcloud iam service-accounts add-iam-policy-binding \
+    "${NUMBER}-compute@developer.gserviceaccount.com" \
+    --member="serviceAccount:${NUMBER}-compute@developer.gserviceaccount.com" \
+    --role=roles/iam.serviceAccountTokenCreator >/dev/null
 
   say "Setup done. Now set GOOGLE_CLIENT_ID and run ./deploy.sh"
   cat <<NEXT
@@ -169,12 +209,32 @@ gcloud run deploy "$SERVICE" --region="$REGION" --image="$IMAGE" \
   --allow-unauthenticated \
   --add-cloudsql-instances="$CONNECTION" \
   --set-secrets=SESSION_SECRET=fmr-session-secret:latest \
-  --set-env-vars="DATABASE_URL=${DATABASE_URL},GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}" \
+  --set-env-vars="DATABASE_URL=${DATABASE_URL},GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID},FMR_UPLOAD_BUCKET=${PROJECT}-fmr-uploads" \
   --memory=1Gi --cpu=1 --timeout=600 \
   --max-instances=1 --min-instances=0 \
   --no-cpu-throttling
 
 URL="$(gcloud run services describe "$SERVICE" --region="$REGION" --format='value(status.url)')"
+
+# Large packages are PUT from the browser to storage.googleapis.com, which is
+# a different origin from the page doing it. Without CORS that request never
+# leaves the browser and nothing server-side records why, so it is set here —
+# after the deploy, because the service URL is what has to be allowed.
+#
+# Cloud Run answers on two hostnames and either may be the one in the address
+# bar, so both are listed.
+BUCKET="${PROJECT}-fmr-uploads"
+if gcloud storage buckets describe "gs://${BUCKET}" >/dev/null 2>&1; then
+  NUMBER="$(gcloud projects describe "$PROJECT" --format='value(projectNumber)')"
+  cat > /tmp/fmr-cors.json <<CORS
+[{"origin": ["${URL}", "https://${SERVICE}-${NUMBER}.${REGION}.run.app"],
+  "method": ["PUT", "OPTIONS"],
+  "responseHeader": ["content-type"],
+  "maxAgeSeconds": 3600}]
+CORS
+  gcloud storage buckets update "gs://${BUCKET}" --cors-file=/tmp/fmr-cors.json >/dev/null
+  rm -f /tmp/fmr-cors.json
+fi
 
 say "Live at ${URL}"
 cat <<DONE

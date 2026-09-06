@@ -16,6 +16,7 @@ import { LedgerError } from '../../core/src/domain/ledger.js';
 import { extractDrawings } from './runner.js';
 import { toDraftSheets, describePackage } from './drawings.js';
 import { stageWorkbook } from './staging.js';
+import { download, discard } from './objectStore.js';
 
 /** Claim the one running slot this project has. */
 export async function startJob(ctx, { sourceName, fileCount, iwpNumber }) {
@@ -55,9 +56,14 @@ async function finish(jobId, { status, batchId = null, message = null }) {
  * Never rejects: it is started without being awaited, and an unhandled
  * rejection would take the server down rather than telling anyone.
  */
-export async function runJob(ctx, jobId, files, { iwpNumber, sourceName }) {
+export async function runJob(ctx, jobId, files, { iwpNumber, sourceName, objects = null }) {
   try {
-    const payload = await extractDrawings(files, { iwpNumber });
+    // A package too big to send through the app was uploaded straight to Cloud
+    // Storage; the bytes are fetched here rather than in the request, so the
+    // download happens on the job's time and not the browser's.
+    const drawings = files ?? await Promise.all(objects.map(download));
+
+    const payload = await extractDrawings(drawings, { iwpNumber });
     const { sheets, summary } = toDraftSheets(payload);
 
     if (!sheets.length) {
@@ -108,6 +114,11 @@ export async function runJob(ctx, jobId, files, { iwpNumber, sourceName }) {
 
     await finish(jobId, { status: 'Failed', message: readable })
       .catch((cause) => console.error('could not record the failed job:', cause));
+  } finally {
+    // The uploads are the client's drawings. They have been read into the
+    // batch by now, or the read failed and they are no use to anyone — either
+    // way they do not stay in the bucket. `discard` never throws.
+    if (objects) await Promise.all(objects.map(discard));
   }
 }
 

@@ -443,33 +443,144 @@ async function send(chosen) {
   return sendOneFile(chosen[0]);
 }
 
-/** A package of drawings: uploaded, then read in the background. */
+/**
+ * The largest body the deployment will carry.
+ *
+ * Cloud Run's front end refuses anything over 32MB, and refuses it before the
+ * server sees it — no log line, and an HTML error page the API layer can only
+ * report as "Something went wrong". Packages near that go the long way round
+ * instead, with the margin covering the framing headers.
+ */
+const DIRECT_UPLOAD_LIMIT = 30_000_000;
+
+const progress = (fraction, done) => {
+  const bar = $('progress');
+  if (bar) bar.style.width = `${Math.round(fraction * 100)}%`;
+  if (fraction === 1 && done) $('uploadWhat').textContent = done;
+};
+
+/**
+ * Send a package the way this server can actually receive it.
+ *
+ * Small packages go straight to the app, which is one request and needs
+ * nothing configured. A package too big for the front end is uploaded to Cloud
+ * Storage a file at a time, and only the object names are posted here.
+ *
+ * The deployment decides which is available, not this page: asking for signed
+ * URLs answers 404 where there is no bucket, and a local run — where there is
+ * no front end and no limit — always uploads directly.
+ */
 async function sendDrawings(files) {
   renderUploading(
     `${files.length} drawing${files.length === 1 ? '' : 's'}`,
     'Sending the drawings…'
   );
 
-  const loaded = await Promise.all(
-    files.map(async (f) => ({ name: f.name, buffer: await f.arrayBuffer() }))
-  );
+  const total = files.reduce((sum, file) => sum + file.size, 0);
 
   try {
-    const started = await uploadWithProgress(
-      '/api/import/drawings',
-      frameFiles(loaded),
-      {
-        onProgress: (fraction) => {
-          const bar = $('progress');
-          if (bar) bar.style.width = `${Math.round(fraction * 100)}%`;
-          if (fraction === 1) $('uploadWhat').textContent = 'Reading the drawings…';
-        }
-      }
-    );
+    const started = total > DIRECT_UPLOAD_LIMIT
+      ? await sendViaStorage(files)
+      : await sendDirectly(files);
+
     watchJob(started.jobId, files.length);
   } catch (failure) {
     renderDrop(failure.message);
   }
+}
+
+/** One request carrying every file, for a package that fits in one. */
+async function sendDirectly(files) {
+  const loaded = await Promise.all(
+    files.map(async (f) => ({ name: f.name, buffer: await f.arrayBuffer() }))
+  );
+
+  return uploadWithProgress('/api/import/drawings', frameFiles(loaded), {
+    onProgress: (fraction) => progress(fraction, 'Reading the drawings…')
+  });
+}
+
+/**
+ * Upload to Cloud Storage first, then hand over the names.
+ *
+ * One file at a time rather than all at once: a package this size is being
+ * sent over site wifi, and several large uploads competing for it finish no
+ * sooner while making the progress bar meaningless.
+ */
+async function sendViaStorage(files) {
+  let uploads;
+  try {
+    ({ uploads } = await api('/api/import/uploads', {
+      method: 'POST',
+      body: JSON.stringify({ files: files.map((f) => ({ name: f.name })) })
+    }));
+  } catch (failure) {
+    // 404 is the deployment saying it has no bucket. Anything else is a real
+    // failure and keeps its own message.
+    if (failure.status !== 404) throw failure;
+    const megabytes = Math.round(files.reduce((s, f) => s + f.size, 0) / 1_000_000);
+    throw new Error(
+      `That package is too large for this server to accept in one piece (${megabytes}MB). `
+      + 'Send the drawings as separate files, or ask for large uploads to be '
+      + 'switched on.'
+    );
+  }
+
+  const total = files.reduce((sum, file) => sum + file.size, 0);
+  const sent = [];
+  let done = 0;
+
+  for (const [index, upload] of uploads.entries()) {
+    const file = files[index];
+
+    await putToStorage(upload.url, file, upload.contentType, (fraction) => {
+      // One bar for the whole package: a bar that restarts at every file
+      // reads as a stall on the twentieth drawing.
+      progress((done + fraction * file.size) / total);
+      $('uploadWhat').textContent =
+        `Sending drawing ${index + 1} of ${uploads.length}…`;
+    });
+
+    done += file.size;
+    sent.push(upload.objectName);
+  }
+
+  $('uploadWhat').textContent = 'Reading the drawings…';
+
+  return api('/api/import/drawings', {
+    method: 'POST',
+    body: JSON.stringify({ objects: sent })
+  });
+}
+
+/**
+ * PUT one file to a signed URL.
+ *
+ * Not `api()`: the request goes to Google, not to this server, so it must
+ * carry none of the session or project headers — and the content type has to
+ * be exactly what was signed or the signature will not match.
+ */
+function putToStorage(url, file, contentType, onProgress) {
+  return new Promise((resolve, reject) => {
+    const request = new XMLHttpRequest();
+    request.open('PUT', url);
+    request.setRequestHeader('content-type', contentType);
+
+    request.upload.onprogress = (event) => {
+      if (event.lengthComputable) onProgress(event.loaded / event.total);
+    };
+
+    request.onload = () => {
+      if (request.status >= 200 && request.status < 300) return resolve();
+      console.error('storage upload failed:', request.status, request.responseText);
+      reject(new Error(`${file.name} could not be uploaded. Try again.`));
+    };
+
+    request.onerror = () =>
+      reject(new Error(`${file.name} did not reach the server.`));
+
+    request.send(file);
+  });
 }
 
 /**
