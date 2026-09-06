@@ -53,6 +53,48 @@ export const session = {
 };
 
 /**
+ * Refuse a screen this person may not use, and say so.
+ *
+ * The nav only offers screens a role can use, but the address bar offers all of
+ * them, and a field user typing /admin.html was shown the office dashboard.
+ * The server refuses the data either way — every restricted endpoint checks its
+ * own permission, so this changes nothing about what can be read. It changes
+ * what a person is shown: one plain sentence instead of a screen of controls
+ * that answer with errors.
+ *
+ * @returns {boolean} true when the screen was refused and drawn over
+ */
+export function refuseUnless(permission, { what, instead = 'Field', href = '/' } = {}) {
+  if (session.can(permission)) return false;
+
+  document.getElementById('tabs')?.setAttribute('hidden', '');
+
+  const view = document.getElementById('view');
+  if (view) {
+    view.textContent = '';
+    const box = document.createElement('div');
+    box.className = 'empty';
+
+    const title = document.createElement('h2');
+    title.textContent = 'You do not have permission to do that';
+
+    const why = document.createElement('p');
+    why.textContent = `${what} is for material management. Your work is on the ${instead} screen.`;
+
+    const link = document.createElement('a');
+    link.className = 'btn';
+    link.href = href;
+    link.textContent = `Go to ${instead}`;
+
+    const wrap = document.createElement('p');
+    wrap.append(link);
+    box.append(title, why, wrap);
+    view.append(box);
+  }
+  return true;
+}
+
+/**
  * Resolve the session, draw the topbar, and hand back control.
  *
  * `onProjectChange` fires when the project selector changes, so a screen can

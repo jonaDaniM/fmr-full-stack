@@ -36,6 +36,17 @@
 }
 .review-trail { font-size: var(--t-sm); margin-bottom: var(--s-3); }
 
+/* The material itself, folded away. A planner who knows the package decides
+   from the header; one who does not opens it, and the answer is on the same
+   screen either way. */
+.review-lines { margin-bottom: var(--s-3); }
+.review-lines > summary {
+  cursor: pointer; padding: var(--s-2) 0;
+  font-size: var(--t-sm); color: var(--ink-dim);
+}
+.review-lines > summary:hover { color: var(--ink); }
+.review-lines table { font-size: var(--t-sm); }
+
 .review-actions {
   display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-2);
 }

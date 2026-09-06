@@ -17,7 +17,7 @@ import {
 import { $, esc, editableNumber } from './lib/dom.js';
 import { confirmAction } from './lib/modal.js';
 import { toast, toastError } from './lib/toast.js';
-import { initShell, session } from './lib/shell.js';
+import { initShell, session, refuseUnless } from './lib/shell.js';
 
 const state = {
   batch: null, extraction: null, polling: null, removedEverything: false,
@@ -42,8 +42,19 @@ const FIELDS = [
   ['size', 'Size'],
   ['uom', 'Unit of measure'],
   ['lineNumber', 'Item / line number'],
-  ['storageLocation', 'Storage location']
+  ['storageLocation', 'Storage location'],
+  // Header fields, offered here because an exported table carries them as a
+  // column on every row rather than as a label above the table. Without these
+  // there was no way to tell the reader which column held the drawing number,
+  // and the import failed on a file that plainly contained it.
+  ['isoNumber', 'Drawing / ISO number'],
+  ['isoSheet', 'Drawing sheet'],
+  ['fmrNumber', 'FMR number'],
+  ['iwpNumber', 'IWP number']
 ];
+
+/** The fields above that belong to the FMR, not to each material line. */
+const HEADER_FIELDS = new Set(['isoNumber', 'isoSheet', 'fmrNumber', 'iwpNumber']);
 
 const FIELD_LABEL = Object.fromEntries(FIELDS);
 
@@ -262,12 +273,26 @@ async function saveTunedProfile() {
     // mapped — so tuning one sheet never loses headings learned earlier.
     const base = await currentDefinition(definition);
     const columns = { ...(base.columns ?? {}) };
+    const header = { ...(base.header ?? {}) };
+
+    const bare = (v) => String(v).toUpperCase().replace(/[^A-Z0-9]/g, '');
+
     for (const { heading, field } of chosen) {
+      // A header field keeps its aliases under `header`, where the reader looks
+      // for it — both above the table and, failing that, as a column heading.
+      if (HEADER_FIELDS.has(field)) {
+        const spec = header[field] ?? { aliases: [] };
+        const aliases = spec.aliases ?? [];
+        if (!aliases.some((alias) => bare(alias) === bare(heading))) {
+          header[field] = { ...spec, aliases: [...aliases, heading] };
+        }
+        continue;
+      }
+
       const existing = columns[field] ?? [];
-      const already = existing.some((alias) =>
-        String(alias).toUpperCase().replace(/[^A-Z0-9]/g, '')
-        === heading.toUpperCase().replace(/[^A-Z0-9]/g, ''));
-      if (!already) columns[field] = [...existing, heading];
+      if (!existing.some((alias) => bare(alias) === bare(heading))) {
+        columns[field] = [...existing, heading];
+      }
     }
 
     await api('/api/import/profiles', {
@@ -276,7 +301,7 @@ async function saveTunedProfile() {
       body: JSON.stringify({
         id: state.profiles.find((p) => p.name === name && !p.builtIn)?.id,
         name,
-        definition: { ...base, columns },
+        definition: { ...base, columns, header },
         basedOn: state.profileName
       })
     });
@@ -866,8 +891,16 @@ $('view').addEventListener('focusout', async (event) => {
   const raw = cell.textContent.trim();
   const value = field === 'quantity' ? Number(raw.replace(/,/g, '')) : raw;
 
-  if (field === 'quantity' && !Number.isFinite(value)) {
+  // An emptied cell reads as 0, which is a finite number and used to save
+  // silently — leaving a line that tells a crew to go and find nothing. Say
+  // what is wrong rather than only colouring the cell red.
+  if (field === 'quantity' && (!raw || !Number.isFinite(value) || value <= 0)) {
     cell.classList.add('bad');
+    toastError(
+      raw
+        ? `"${raw}" is not a quantity anyone can go and find.`
+        : 'A line needs a quantity. Remove the line if it is not wanted.'
+    );
     return;
   }
   cell.classList.remove('bad');
@@ -977,5 +1010,7 @@ await initShell({
   }
 });
 
-await loadProfiles();
-renderDrop();
+if (!refuseUnless('ownerEdit', { what: 'Importing' })) {
+  await loadProfiles();
+  renderDrop();
+}

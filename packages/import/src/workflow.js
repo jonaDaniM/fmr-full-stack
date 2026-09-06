@@ -241,6 +241,31 @@ export async function reviewQueue(client, ctx, { state = null } = {}) {
     [ctx.projectId, wanted]
   );
 
+  // The planner's job is to judge the request against the work package, which
+  // cannot be done from a line count alone. Read-only here on purpose: this
+  // screen is a decision, not an editor, and the planner has no draft access.
+  // One query for the whole queue — a client cannot run queries in parallel.
+  const { rows: lineRows } = rows.length
+    ? await client.query(
+        `SELECT item_id, line_number, commodity_code, size, description,
+                quantity, uom
+           FROM import_lines
+          WHERE item_id = ANY($1::uuid[])
+          ORDER BY item_id, line_number`,
+        [rows.map((r) => r.id)]
+      )
+    : { rows: [] };
+
+  const linesByItem = {};
+  for (const line of lineRows) (linesByItem[line.item_id] ??= []).push({
+    lineNumber: line.line_number,
+    commodityCode: line.commodity_code,
+    size: line.size,
+    description: line.description,
+    quantity: line.quantity,
+    uom: line.uom
+  });
+
   return {
     states: mine,
     items: rows.map((row) => ({
@@ -250,6 +275,7 @@ export async function reviewQueue(client, ctx, { state = null } = {}) {
       isoNumber: row.iso_number,
       isoSheet: row.iso_sheet,
       lineCount: row.line_count,
+      lines: linesByItem[row.id] ?? [],
       state: row.workflow_state,
       sourceName: row.source_name,
       createdAt: row.created_at,

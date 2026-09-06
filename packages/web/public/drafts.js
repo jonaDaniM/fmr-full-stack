@@ -13,7 +13,7 @@ import { api, idempotencyKey } from './lib/api.js';
 import { $, esc, n, day, skeleton, editableNumber } from './lib/dom.js';
 import { dialog, confirmAction, askReason } from './lib/modal.js';
 import { toast, toastError } from './lib/toast.js';
-import { initShell } from './lib/shell.js';
+import { initShell, refuseUnless } from './lib/shell.js';
 import { parsePaste } from './lib/paste.js';
 
 const state = { tab: 'queue', drafts: null, editing: null, options: {} };
@@ -324,7 +324,12 @@ async function openDraft(itemId, { keepScroll = false } = {}) {
     if (!summary) return toastError('That draft is no longer in the queue.');
 
     const batch = await api(`/api/import/${summary.batchId}`);
-    const item = batch.items[0];
+    // A batch holds every FMR read out of one package, so the one being opened
+    // has to be picked by id. Taking items[0] opened the first FMR of the
+    // package whichever card was clicked — a planner editing the 14th drawing
+    // was shown, and would have edited, the 1st.
+    const item = batch.items.find((i) => i.id === itemId);
+    if (!item) return toastError('That draft is no longer in the queue.');
 
     state.editing = { itemId, batchId: summary.batchId };
     switchTab('new', false);
@@ -580,5 +585,12 @@ await initShell({
   current: 'drafts',
   onProjectChange: () => { state.editing = null; switchTab('queue'); }
 });
-await loadOptions();
-show();
+if (!refuseUnless('ownerEdit', { what: 'The drafts queue' })) {
+  await loadOptions();
+  show();
+
+  // Arriving from the review queue with a particular requisition in mind: open
+  // that one rather than dropping the reader into the list to find it again.
+  const wanted = new URLSearchParams(location.search).get('item');
+  if (wanted) await openDraft(wanted);
+}

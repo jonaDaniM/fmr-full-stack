@@ -10,7 +10,7 @@ import { api, idempotencyKey } from './lib/api.js';
 import { $, esc, n, day, skeleton, emptyRow } from './lib/dom.js';
 import { dialog, confirmAction } from './lib/modal.js';
 import { toast, toastError } from './lib/toast.js';
-import { initShell, session } from './lib/shell.js';
+import { initShell, session, refuseUnless } from './lib/shell.js';
 
 const REGISTER_DEFAULTS = Object.freeze({
   query: '', queryType: 'AUTO', status: '', priority: '',
@@ -1050,5 +1050,8 @@ async function loadFilters() {
 }
 
 await initShell({ current: 'office', onProjectChange: show });
-await loadFilters();
-show();
+
+if (!refuseUnless('adminBackorder', { what: 'The office screens' })) {
+  await loadFilters();
+  show();
+}

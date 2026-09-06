@@ -138,6 +138,35 @@ export function findTableHeader(grid, columns, { searchRows = 40 } = {}) {
 }
 
 /**
+ * A header value carried in a table column rather than labelled above it.
+ *
+ * The drawing number reaches this system two ways. A workbook sheet names it
+ * once at the top, which `findLabeledValue` reads. An exported table repeats it
+ * on every row instead — both the drawing extractor's CSV and the live FMR
+ * export do this — and there is nothing above the table to find. Reading the
+ * first row's value covers that, since one sheet is one FMR either way.
+ *
+ * Returns null when the column is absent or holds nothing, so the caller can
+ * still report a genuinely missing field.
+ */
+function columnValue(grid, table, aliases = []) {
+  // Matched the way findTableHeader matches, so "ISO No" and "iso_no" are the
+  // same heading here and there.
+  const bare = (v) => upper(v).replace(/[^A-Z0-9]/g, '');
+  const want = aliases.map(bare).filter(Boolean);
+  const headings = grid[table.row] ?? [];
+
+  const at = headings.findIndex((cell) => cell && want.includes(bare(cell)));
+  if (at === -1) return null;
+
+  for (let r = table.row + 1; r < grid.length; r += 1) {
+    const cell = clean(grid[r]?.[at]);
+    if (cell) return cell;
+  }
+  return null;
+}
+
+/**
  * Read one worksheet into a proposed FMR.
  *
  * @param {string[][]} grid    the sheet as rows of cells
@@ -165,6 +194,15 @@ export function extractSheet(grid, profile, sheetName = '') {
     const found = findLabeledValue(grid, spec.aliases, { searchRows: headerRows });
 
     if (!found) {
+      // A label above the table is one way to carry the drawing number; the
+      // other is a column repeating it on every row, which is what both the
+      // drawing extractor and the live export produce. Fall back to the table
+      // before calling it missing.
+      const fromColumn = table && columnValue(grid, table, spec.aliases);
+      if (fromColumn) {
+        header[field] = fromColumn;
+        continue;
+      }
       if (spec.required) {
         note(SEVERITY.ERROR, 'MISSING_HEADER', `Could not find "${field}" on the sheet.`, { field });
       }

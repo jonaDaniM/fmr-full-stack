@@ -334,6 +334,22 @@ export async function deleteDraftLine(ctx, { lineId }) {
     const itemId = rows[0].item_id;
     const item = await assertEditable(client, itemId, projectId);
 
+    // The import review screen refuses this and so must the draft editor: the
+    // same action on the same FMR should not depend on which screen a planner
+    // happens to be on. Deleting it here used to leave an FMR with no material,
+    // caught only afterwards by NO_LINES — an error about a state that should
+    // never have been reachable. Archiving is the way to put a whole FMR aside.
+    const { rows: counted } = await client.query(
+      'SELECT count(*)::int AS n FROM import_lines WHERE item_id = $1',
+      [itemId]
+    );
+    if (counted[0].n <= 1) {
+      throw new LedgerError(
+        'That is the last line on this FMR. Archive the whole FMR instead.',
+        'LAST_LINE'
+      );
+    }
+
     await client.query('DELETE FROM import_lines WHERE id = $1', [lineId]);
 
     // Renumber so the crew sees 1..n, not a gap where the deletion was.
@@ -465,13 +481,27 @@ export async function restoreDraft(ctx, { batchId, reason }) {
 export async function listDrafts(client, projectId, { source, includeArchived = true } = {}) {
   const { rows } = await client.query(
     `SELECT b.id, b.source, b.source_name, b.archived, b.archive_reason,
-            b.error_count, b.warning_count, b.line_count, b.created_at,
+            b.created_at,
+            -- Every count on this card describes one FMR, so none of them may
+            -- come from the batch. Reading the batch totals put "90 lines" on
+            -- all 26 cards of a package, and marked all 26 with an error when
+            -- a single quantity on one of them had been mistyped. Only a batch
+            -- with no item yet falls back to the batch's own figures.
+            coalesce(i.line_count, b.line_count) AS line_count,
+            coalesce(q.errors, b.error_count) AS error_count,
+            coalesce(q.warnings, b.warning_count) AS warning_count,
             u.display_name AS created_by_name,
             i.id AS item_id, i.fmr_number, i.iwp_number, i.iso_number,
             i.iso_sheet, i.requested_by, i.date_required, i.priority,
             i.status, i.existing_fmr_id
        FROM import_batches b
        LEFT JOIN import_items i ON i.batch_id = b.id
+       LEFT JOIN (
+         SELECT item_id,
+                count(*) FILTER (WHERE severity = 'error' AND NOT resolved) AS errors,
+                count(*) FILTER (WHERE severity = 'warning' AND NOT resolved) AS warnings
+           FROM import_issues WHERE item_id IS NOT NULL GROUP BY item_id
+       ) q ON q.item_id = i.id
        LEFT JOIN users u ON u.id = b.created_by
       WHERE b.project_id = $1
         AND b.published_at IS NULL
@@ -496,9 +526,12 @@ export async function listDrafts(client, projectId, { source, includeArchived = 
     dateRequired: row.date_required,
     priority: row.priority,
     status: row.status,
-    lineCount: row.line_count,
-    errorCount: row.error_count,
-    warningCount: row.warning_count,
+    // Numbers, not the strings pg returns for count(): the queue tile tests
+    // these for truthiness, and "0" is true — which marked all 26 drafts as
+    // having errors when one of them had a single mistyped quantity.
+    lineCount: Number(row.line_count),
+    errorCount: Number(row.error_count),
+    warningCount: Number(row.warning_count),
     isDuplicate: !!row.existing_fmr_id,
     createdBy: row.created_by_name,
     createdAt: row.created_at

@@ -12,7 +12,7 @@
  */
 
 import { api, idempotencyKey } from './lib/api.js';
-import { $, esc } from './lib/dom.js';
+import { $, esc, n } from './lib/dom.js';
 import { askReason, confirmAction, dialog } from './lib/modal.js';
 import { toast, toastError } from './lib/toast.js';
 import { initShell, session } from './lib/shell.js';
@@ -91,11 +91,48 @@ function renderCard(item) {
     ${item.numberedByName ? `
       <p class="dim review-trail">Numbered by ${esc(item.numberedByName)}.</p>` : ''}
 
+    ${renderLines(item)}
+
     <div class="review-actions">
-      <a class="btn btn-quiet" href="/drafts.html">Open the draft</a>
+      ${session.can('ownerEdit')
+        ? `<a class="btn btn-quiet" href="/drafts.html?item=${encodeURIComponent(item.id)}">Open the draft</a>`
+        : ''}
       ${renderActions(item)}
     </div>
   </section>`;
+}
+
+/**
+ * The material being approved, read-only.
+ *
+ * A planner is asked whether a requisition suits the work package, and used to
+ * be shown only how many lines it had — the button offering the draft went to a
+ * screen their role cannot load, so they were deciding blind. Read-only because
+ * this screen is a decision and not an editor: correcting a line is the
+ * originator's job, which is what returning it for correction is for.
+ */
+function renderLines(item) {
+  if (!item.lines?.length) return '';
+
+  return `<details class="review-lines">
+    <summary>${esc(item.lines.length)} material line${item.lines.length === 1 ? '' : 's'}</summary>
+    <div class="tw"><table>
+      <thead><tr>
+        <th class="w-tiny">#</th><th class="w-sm">Code</th><th class="w-sm">Size</th>
+        <th class="w-grow">Description</th><th class="num w-sm">Qty</th><th class="w-sm">UOM</th>
+      </tr></thead>
+      <tbody>${item.lines.map((l) => `
+        <tr>
+          <td class="num">${esc(l.lineNumber)}</td>
+          <td class="mono">${esc(l.commodityCode ?? '')}</td>
+          <td class="mono">${esc(l.size ?? '')}</td>
+          <td>${esc(l.description ?? '')}</td>
+          <td class="num">${esc(n(l.quantity))}</td>
+          <td class="mono">${esc(l.uom ?? '')}</td>
+        </tr>`).join('')}
+      </tbody>
+    </table></div>
+  </details>`;
 }
 
 /** The moves this person can make on this requisition, as buttons. */

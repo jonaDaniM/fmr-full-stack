@@ -8,6 +8,7 @@
 
 import { withTransaction } from '../../core/src/db/pool.js';
 import { extractWorkbook, SEVERITY } from './extract.js';
+import { validateDraft } from './validate.js';
 import { LedgerError } from '../../core/src/domain/ledger.js';
 import { STATES, STATE_LABELS } from '../../core/src/domain/workflow.js';
 
@@ -232,7 +233,11 @@ export async function getBatch(client, projectId, batchId) {
         description: l.description,
         quantity: l.quantity == null ? null : Number(l.quantity),
         uom: l.uom,
-        uomRule: l.uom_rule
+        uomRule: l.uom_rule,
+        // Left out, so the draft editor drew an empty Location for a line that
+        // had one — and that cell is editable, so leaving it alone was enough
+        // to write the blank back over a real storage location.
+        storageLocation: l.storage_location
       })),
       issues: (issuesByItem[item.id] ?? []).map(serializeIssue)
     }))
@@ -268,8 +273,111 @@ export async function correctLine(ctx, { lineId, patch }) {
     if (!rows[0]) {
       throw new LedgerError('That line is not in an unpublished batch.', 'NOT_FOUND');
     }
+
+    await revalidateLine(client, rows[0]);
     return rows[0];
   });
+}
+
+/**
+ * Re-check one line after it has been edited by hand, and reconcile the issues
+ * recorded against it.
+ *
+ * Validation used to run only while staging a file, so a value typed into the
+ * review screen was never checked again: clearing a quantity stored a 0, no
+ * issue was written, the tiles still read zero errors, and the batch published
+ * a line telling a crew to go and find nothing. The parser's own fail-safe was
+ * working the whole time — it was the correction path that had none.
+ *
+ * Issues from the original parse are anchored by `source_row`; these are
+ * anchored by `field_name` as well, so a re-edit replaces its own rows and
+ * leaves the parse's untouched.
+ */
+async function revalidateLine(client, line) {
+  const { rows: context } = await client.query(
+    `SELECT i.id AS item_id, i.batch_id, i.sheet_name
+       FROM import_items i WHERE i.id = $1`,
+    [line.item_id]
+  );
+  const { item_id: itemId, batch_id: batchId, sheet_name: sheetName } = context[0];
+
+  // Validated on its own: one edited line says nothing about whether the FMR
+  // still has a number or a drawing, and re-checking the header here would
+  // raise issues the person did not touch.
+  const { issues } = validateDraft(
+    { header: {}, lines: [lineToDraft(line)] },
+    { requireFmrNumber: false }
+  );
+  // `validateDraft` checks the header too, and an empty one raises a missing
+  // drawing and sheet that have nothing to do with the cell just edited. Only
+  // issues carrying a line number belong to the line.
+  const lineIssues = issues.filter((i) => i.lineNumber != null);
+
+  await client.query(
+    `DELETE FROM import_issues
+      WHERE item_id = $1 AND source_row = $2 AND field_name = 'edited'`,
+    [itemId, line.source_row]
+  );
+
+  for (const issue of lineIssues) {
+    await client.query(
+      `INSERT INTO import_issues
+         (batch_id, item_id, sheet_name, severity, code, message,
+          field_name, source_row, source_value)
+       VALUES ($1,$2,$3,$4,$5,$6,'edited',$7,$8)`,
+      [batchId, itemId, sheetName, issue.severity, issue.code, issue.message,
+       line.source_row, String(line.quantity ?? '')]
+    );
+  }
+
+  await recountBatch(client, batchId);
+}
+
+/** The shape `validateDraft` reads, from a stored row. */
+const lineToDraft = (line) => ({
+  commodityCode: line.commodity_code,
+  size: line.size,
+  description: line.description,
+  quantity: line.quantity,
+  uom: line.uom,
+  storageLocation: line.storage_location
+});
+
+/**
+ * Bring a batch's counters back in line with what it actually holds.
+ *
+ * All four are written once while staging a file and were never recomputed, so
+ * removing a line or a whole FMR left the tiles reading the size of the file as
+ * it arrived rather than the queue as it stands — a planner who dropped two
+ * drawings still saw 26 Sheets over a list of 24. The counts and the rows
+ * underneath them have to agree, or the screen is not worth reading.
+ *
+ * The tiles and the publish gate also read different things — the tiles read
+ * these counts, the gate counts unresolved error rows — so both are derived
+ * here from the same rows.
+ */
+async function recountBatch(client, batchId) {
+  await client.query(
+    `UPDATE import_batches b
+        SET sheet_count = c.sheets,
+            line_count = c.lines,
+            error_count = i.errors,
+            warning_count = i.warnings
+       FROM (
+         SELECT count(DISTINCT it.id) AS sheets, count(l.id) AS lines
+           FROM import_items it
+           LEFT JOIN import_lines l ON l.item_id = it.id
+          WHERE it.batch_id = $1
+       ) c,
+       (
+         SELECT
+           count(*) FILTER (WHERE severity = 'error' AND NOT resolved) AS errors,
+           count(*) FILTER (WHERE severity = 'warning' AND NOT resolved) AS warnings
+           FROM import_issues WHERE batch_id = $1
+       ) i
+      WHERE b.id = $1`,
+    [batchId]
+  );
 }
 
 /**
@@ -448,7 +556,7 @@ function describeState(state) {
 export async function removeStagedLine(ctx, { lineId }) {
   return withTransaction(async (client) => {
     const { rows: found } = await client.query(
-      `SELECT l.id, l.item_id, i.fmr_number
+      `SELECT l.id, l.item_id, i.fmr_number, i.batch_id
          FROM import_lines l
          JOIN import_items i ON i.id = l.item_id
          JOIN import_batches b ON b.id = i.batch_id
@@ -503,6 +611,8 @@ export async function removeStagedLine(ctx, { lineId }) {
        ctx.user.id, ctx.user.email]
     );
 
+    await recountBatch(client, line.batch_id);
+
     return { ok: true, itemId: line.item_id, remaining: counted[0].n - 1 };
   });
 }
@@ -545,6 +655,8 @@ export async function removeStagedItem(ctx, { itemId }) {
 
     // import_lines and import_issues cascade from the item.
     await client.query('DELETE FROM import_items WHERE id = $1', [itemId]);
+
+    await recountBatch(client, item.batch_id);
 
     return { ok: true, fmrNumber: item.fmr_number };
   });

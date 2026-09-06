@@ -14,7 +14,7 @@ import { api, idempotencyKey } from './lib/api.js';
 import { $, esc, n, when, skeleton, emptyRow } from './lib/dom.js';
 import { dialog, confirmAction, askReason } from './lib/modal.js';
 import { toast, toastError } from './lib/toast.js';
-import { initShell, session } from './lib/shell.js';
+import { initShell, session, refuseUnless } from './lib/shell.js';
 import { destinationFor } from './lib/checkRoutes.js';
 
 const state = { tab: 'health' };
@@ -874,4 +874,4 @@ $('view').addEventListener('click', async (event) => {
 });
 
 await initShell({ current: 'owner', onProjectChange: show });
-show();
+if (!refuseUnless('ownerEdit', { what: 'The owner screens' })) show();

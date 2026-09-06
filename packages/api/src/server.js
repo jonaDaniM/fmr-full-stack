@@ -414,7 +414,11 @@ route('GET', /^\/api\/iso-summary$/, async (req, res, { url }) => {
 
 route('GET', /^\/api\/dashboard$/, async (req, res) => {
   const ctx = await authenticate(req);
-  requirePermission(ctx, 'search');
+  // The office dashboard, and so the same permission as the queues it
+  // summarises. It asked only for `search`, which every role has, so a field
+  // user opening /admin.html by hand was shown the backorder queue, the bag
+  // counts and every crew's movements — the one Office panel that answered.
+  requirePermission(ctx, 'adminBackorder');
   await withClient(ctx, (c) => getDashboard(c, ctx.projectId), res);
 });
 
