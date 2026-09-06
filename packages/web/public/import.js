@@ -621,23 +621,44 @@ function renderBatch() {
   const selectable = batch.items.filter((i) => i.status !== 'Blocked');
   const selected = batch.items.filter((i) => i.selected).length;
 
+  // Blocked is its own count. A batch where nothing can be published while the
+  // Errors tile reads 0 looks fine and is not — the reason is a duplicate
+  // number or a missing detail, neither of which is an "error" in the row.
+  const blocked = batch.items.length - selectable.length;
+  const staged = batch.items.filter((i) =>
+    i.issues?.some((issue) => issue.code === 'ALREADY_STAGED')).length;
+
   $('view').innerHTML = `
     ${state.removedEverything ? '' : `<div class="stats">
       <div class="stat"><span class="n">${batch.summary.sheets}</span><span class="l">Sheets</span></div>
       <div class="stat"><span class="n">${batch.summary.lines}</span><span class="l">Lines</span></div>
       <div class="stat ${batch.summary.errors ? 'stat-danger' : ''}">
         <span class="n">${batch.summary.errors}</span><span class="l">Errors</span></div>
+      <div class="stat ${blocked ? 'stat-danger' : ''}">
+        <span class="n">${esc(String(blocked))}</span><span class="l">Blocked</span></div>
       <div class="stat ${batch.summary.warnings ? 'stat-warn' : ''}">
         <span class="n">${batch.summary.warnings}</span><span class="l">Warnings</span></div>
     </div>`}
+
+    ${staged && !state.removedEverything ? `
+      <div class="issue issue-error">
+        <strong>This package is already in the queue.</strong>
+        ${esc(String(staged))} of its ${esc(String(batch.items.length))} FMRs
+        carry a number that is already waiting, so their numbers were dropped
+        rather than their material. Either work from the batch already staged
+        and start this one over, or give these FMRs numbers of their own.
+      </div>` : ''}
 
     ${state.extraction ? `<div class="extract-note">${esc(state.extraction)}</div>` : ''}
 
     <p class="source-line">
       <strong>${esc(batch.sourceName)}</strong> &middot; read with the
       "${esc(batch.profileName)}" profile
-      ${batch.summary.errors && !state.removedEverything
+      ${!state.removedEverything && batch.summary.errors
         ? '&middot; errors must be fixed before publishing'
+        : ''}
+      ${!state.removedEverything && !batch.summary.errors && blocked
+        ? `&middot; ${esc(String(blocked))} of ${esc(String(batch.items.length))} cannot be published yet`
         : ''}
     </p>
 
