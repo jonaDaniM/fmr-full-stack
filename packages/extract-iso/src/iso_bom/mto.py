@@ -189,7 +189,10 @@ def takeoff_row(material: Dict[str, object], drawing: Dict[str, object],
     return {
         "cwa": package.get("cwa") or "",
         "iwp": package.get("iwpNumber") or "",
-        "lineNumber": line_number(drawing_number),
+        # The client's form carries the whole drawing number here, sheet
+        # suffix included, and repeats the sheet in its own column. Stripping
+        # the suffix produced a value their purchasing team does not recognise.
+        "lineNumber": drawing_number or line_number(drawing_number),
         "sheet": sheet_number(drawing_number),
         "pipeSpec": drawing.get("pipeSchedule") or "",
         "description": material.get("description") or "",

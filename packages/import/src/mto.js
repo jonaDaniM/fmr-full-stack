@@ -24,7 +24,14 @@
 
 import { LedgerError } from '../../core/src/domain/ledger.js';
 
-/** The takeoff form's own columns, in its own order. */
+/**
+ * The takeoff form's own columns, in its own order.
+ *
+ * Taken from the client's real filled-in workbook
+ * (`Archive/templates/createMTO/`), not inferred. The three paint columns are
+ * blank in every example seen so far, but they are on the form the purchasing
+ * team reads, and a missing column shifts everything after it on paste.
+ */
 const COLUMNS = Object.freeze([
   ['cwa', 'CWA'],
   ['iwp', 'IWP'],
@@ -35,14 +42,60 @@ const COLUMNS = Object.freeze([
   ['size', 'SIZE'],
   ['commodityCode', 'COMMODITY CODE'],
   ['quantity', 'QTY'],
-  ['uom', 'UOM']
+  ['uom', 'UOM'],
+  ['epicPaintCode', 'EPIC PAINT CODE'],
+  ['custPaintCode', 'CUST. PAINT CODE'],
+  ['color', 'COLOR']
 ]);
 
+/**
+ * The sheets of the form, in the order the client's workbook has them.
+ *
+ * COMBINED holds every row; the category sheets are the same material sorted
+ * by how it is bought. Blinds, valves and birdscreens are quoted separately
+ * from pipe, which is why they get sheets of their own rather than being
+ * lumped in with fittings.
+ */
 export const TAKEOFF_SHEETS = Object.freeze([
+  'COMBINED',
+  'BLINDS',
   'PIPE & FITTINGS',
   'BOLTS & GASKETS',
-  'COMBINED'
+  'SUPPORTS',
+  'VALVES',
+  'BIRDSCREENS',
+  'OTHER MATERIALS'
 ]);
+
+const BLIND_RE = /\bBLINDS?\b/i;
+const BIRDSCREEN_RE = /\bBIRD\s*SCREENS?\b/i;
+const VALVE_RE =
+  /(?:\bVALVES?\b|^\s*(?:BALL|CHECK|GATE|GLOBE|BUTTERFLY|DIAPHRAGM|PLUG|NEEDLE|CONTROL|RELIEF|SAFETY)\b)/i;
+const PIPE_FITTING_RE =
+  /\b(?:PIPE|ELL|ELBOW|TEE|REDUCER|CAP|COUPLING|SOCKOLET|WELDOLET|THREDOLET|NIPPLE|FLANGE|UNION|SWAGE)\b/i;
+
+/**
+ * Which sheet a row belongs on.
+ *
+ * Ported from the client's own `material_category_sheet`, including the order
+ * of the tests — a blind is a blind before it is anything else, and a ball
+ * valve is a valve rather than a fitting. Changing the order silently moves
+ * material onto the wrong buyer's sheet.
+ */
+export function takeoffSheetFor(itemType, description) {
+  const type = String(itemType ?? '').trim().toUpperCase();
+  const text = String(description ?? '').replace(/\s+/g, ' ').trim();
+
+  if (BLIND_RE.test(text)) return 'BLINDS';
+  if (['BOLT', 'GASKET', 'WASHER'].includes(type)) return 'BOLTS & GASKETS';
+  if (type === 'SUPPORT') return 'SUPPORTS';
+  if (BIRDSCREEN_RE.test(text)) return 'BIRDSCREENS';
+  if (VALVE_RE.test(text)) return 'VALVES';
+  if (['PIPE', 'FITTING'].includes(type) || PIPE_FITTING_RE.test(text)) {
+    return 'PIPE & FITTINGS';
+  }
+  return 'OTHER MATERIALS';
+}
 
 /**
  * One CSV cell.
@@ -76,10 +129,17 @@ export function takeoffCsv(rows) {
  */
 export function groupBySheet(rows) {
   const grouped = new Map(TAKEOFF_SHEETS.map((name) => [name, []]));
+
   for (const row of rows ?? []) {
-    const sheet = grouped.has(row.takeoffSheet) ? row.takeoffSheet : 'COMBINED';
-    grouped.get(sheet).push(row);
+    // COMBINED is the whole takeoff; the category sheets are the same rows
+    // sorted by who quotes them. A row appears on both, as it does on the
+    // client's own workbook.
+    grouped.get('COMBINED').push(row);
+
+    const sheet = takeoffSheetFor(row.itemType, row.description);
+    grouped.get(grouped.has(sheet) ? sheet : 'OTHER MATERIALS').push(row);
   }
+
   return grouped;
 }
 

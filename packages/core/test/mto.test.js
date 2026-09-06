@@ -10,7 +10,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
-  takeoffCsv, groupBySheet, takeoffDocument, takeoffFilename, TAKEOFF_SHEETS
+  takeoffCsv, groupBySheet, takeoffDocument, takeoffFilename, takeoffSheetFor,
+  TAKEOFF_SHEETS
 } from '../../import/src/mto.js';
 
 const row = (over = {}) => ({
@@ -21,10 +22,14 @@ const row = (over = {}) => ({
 });
 
 test('the header is the takeoff form\'s own columns, in its order', () => {
+  // Checked against the client's real filled-in workbook, not inferred. The
+  // three paint columns are blank in every example seen, but they are on the
+  // form, and a missing column shifts everything after it on paste.
   const [header] = takeoffCsv([]).split('\r\n');
   assert.equal(header,
     '"CWA","IWP","LINE NUMBER","SHEET","PIPE SPEC","DESCRIPTION",'
-    + '"SIZE","COMMODITY CODE","QTY","UOM"');
+    + '"SIZE","COMMODITY CODE","QTY","UOM",'
+    + '"EPIC PAINT CODE","CUST. PAINT CODE","COLOR"');
 });
 
 test('a commodity code is not turned into a date by Excel', () => {
@@ -41,16 +46,38 @@ test('a description containing a quote does not break the row', () => {
   assert.equal(csv.split('\r\n').length, 2, 'the row split itself in two');
 });
 
-test('material is grouped by where it is bought', () => {
+test('material is routed to the sheet that quotes it', () => {
+  // Ported from the client's own material_category_sheet, order included.
+  assert.equal(takeoffSheetFor('PIPE', 'PIPE SCH 40 ERW STL A53-B'), 'PIPE & FITTINGS');
+  assert.equal(takeoffSheetFor('BOLT', 'STUD BOLT B7 W/ 2H NUTS'), 'BOLTS & GASKETS');
+  assert.equal(takeoffSheetFor('GASKET', 'GASKET SPIRAL WOUND'), 'BOLTS & GASKETS');
+  assert.equal(takeoffSheetFor('SUPPORT', '5UG, U-BOLT GUIDE'), 'SUPPORTS');
+  assert.equal(takeoffSheetFor('', 'BIRDSCREEN 316 SS 45 DEG'), 'BIRDSCREENS');
+  assert.equal(takeoffSheetFor('', 'BALL 1000# CWP BW 316SS'), 'VALVES');
+  assert.equal(takeoffSheetFor('', 'BLIND FLANGE 150#'), 'BLINDS');
+});
+
+test('a blind is a blind before it is anything else', () => {
+  // The client tests blinds first. A "BLIND FLANGE" routed as a fitting is
+  // quoted by the wrong supplier.
+  assert.equal(takeoffSheetFor('FITTING', 'BLIND FLANGE 150# RF A105'), 'BLINDS');
+});
+
+test('a ball valve is a valve, not a fitting', () => {
+  assert.equal(takeoffSheetFor('FITTING', 'BALL 1000# CWP BW 316SS TFE'), 'VALVES');
+});
+
+test('COMBINED holds every row, and the category sheets sort them', () => {
   const grouped = groupBySheet([
-    row({ takeoffSheet: 'PIPE & FITTINGS' }),
-    row({ takeoffSheet: 'BOLTS & GASKETS' }),
-    row({ takeoffSheet: 'BOLTS & GASKETS' }),
-    row({ takeoffSheet: 'COMBINED' })
+    row({ itemType: 'PIPE', description: 'PIPE SCH 40 ERW STL A53-B' }),
+    row({ itemType: 'BOLT', description: 'STUD BOLT B7' }),
+    row({ itemType: 'SUPPORT', description: '5UG, U-BOLT GUIDE' })
   ]);
+
+  assert.equal(grouped.get('COMBINED').length, 3, 'COMBINED is the whole takeoff');
   assert.equal(grouped.get('PIPE & FITTINGS').length, 1);
-  assert.equal(grouped.get('BOLTS & GASKETS').length, 2);
-  assert.equal(grouped.get('COMBINED').length, 1);
+  assert.equal(grouped.get('BOLTS & GASKETS').length, 1);
+  assert.equal(grouped.get('SUPPORTS').length, 1);
 });
 
 test('every sheet appears even when the package has none of that material', () => {
@@ -61,9 +88,12 @@ test('every sheet appears even when the package has none of that material', () =
 });
 
 test('a row in no known category still reaches the buyer', () => {
-  const grouped = groupBySheet([row({ takeoffSheet: 'NOT A SHEET' })]);
-  assert.equal(grouped.get('COMBINED').length, 1,
+  const grouped = groupBySheet([
+    row({ itemType: 'MYSTERY', description: 'SOMETHING UNFAMILIAR' })
+  ]);
+  assert.equal(grouped.get('OTHER MATERIALS').length, 1,
     'an unclassified row would otherwise be bought by nobody');
+  assert.equal(grouped.get('COMBINED').length, 1, 'and it is still on COMBINED');
 });
 
 test('the document names the package and counts what is in it', () => {

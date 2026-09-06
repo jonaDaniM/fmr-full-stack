@@ -13,7 +13,7 @@ those backorders. The ledger of who has what is the whole point of the system.
 brew services start postgresql@17   # once
 npm start                           # http://localhost:3000
 npm run start:reset                 # wipe and start fresh
-npm test                            # 343 tests + the web and SQL checks
+npm test                            # 352 tests + the web and SQL checks
 npm run test:db                     # 64 more, against a real Postgres
 ```
 
@@ -120,9 +120,10 @@ Deployed, and carrying the client's real data — 837 FMRs, 5,706 lines, 22
 Turner Industries users. `packages/migrate` did the load; its dry run still
 reports what would fail before anything is written.
 
-Eight commits are ahead of the deployed revision, including migration `011`,
-which adds the approval chain. **That migration must run before the new code
-serves** — publishing references `workflow_state`.
+Seventeen commits are ahead of the deployed revision, including migrations
+`011`, `012` and `013`. **All three must run before the new code serves** —
+publishing references `workflow_state`, and the review queue and import
+profiles reference tables the deployed schema does not have.
 
 Migration `012` adds Line Swap. Two rules there are easy to undo by accident:
 lending reduces the donor's located **and** available totals and never touches
