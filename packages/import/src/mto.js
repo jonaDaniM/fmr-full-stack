@@ -67,6 +67,10 @@ export const TAKEOFF_SHEETS = Object.freeze([
   'OTHER MATERIALS'
 ]);
 
+/** Support and attachment codes — kept in step with `iso_bom/mto.py`. */
+const SUPPORT_CODE_RE =
+  /^5(?:UGSP|UG|US|MUGSP|MUG|FSS\d*|FS\d*|MHR\d*|ABS\d*|MS|CH|CC|CI|C|SH|S\d|DA\d*|ISC|BG\d*|MG\d*|G\d*)/i;
+
 const BLIND_RE = /\bBLINDS?\b/i;
 const BIRDSCREEN_RE = /\bBIRD\s*SCREENS?\b/i;
 const VALVE_RE =
@@ -82,13 +86,19 @@ const PIPE_FITTING_RE =
  * valve is a valve rather than a fitting. Changing the order silently moves
  * material onto the wrong buyer's sheet.
  */
-export function takeoffSheetFor(itemType, description) {
+export function takeoffSheetFor(itemType, description, commodityCode) {
   const type = String(itemType ?? '').trim().toUpperCase();
   const text = String(description ?? '').replace(/\s+/g, ' ').trim();
+  const code = String(commodityCode ?? '').trim();
 
   if (BLIND_RE.test(text)) return 'BLINDS';
   if (['BOLT', 'GASKET', 'WASHER'].includes(type)) return 'BOLTS & GASKETS';
-  if (type === 'SUPPORT') return 'SUPPORTS';
+
+  // The code decides a support, never the description. A shoe described as
+  // "WELDED SHOE LONG, SS, 3\" HIGH, 12\" PIPE" names the pipe it holds; the
+  // description match below would otherwise put it on the pipe buyer's sheet.
+  if (type === 'SUPPORT' || SUPPORT_CODE_RE.test(code)) return 'SUPPORTS';
+
   if (BIRDSCREEN_RE.test(text)) return 'BIRDSCREENS';
   if (VALVE_RE.test(text)) return 'VALVES';
   if (['PIPE', 'FITTING'].includes(type) || PIPE_FITTING_RE.test(text)) {
@@ -136,7 +146,7 @@ export function groupBySheet(rows) {
     // client's own workbook.
     grouped.get('COMBINED').push(row);
 
-    const sheet = takeoffSheetFor(row.itemType, row.description);
+    const sheet = takeoffSheetFor(row.itemType, row.description, row.commodityCode);
     grouped.get(grouped.has(sheet) ? sheet : 'OTHER MATERIALS').push(row);
   }
 

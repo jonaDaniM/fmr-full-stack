@@ -67,6 +67,39 @@ test('a ball valve is a valve, not a fitting', () => {
   assert.equal(takeoffSheetFor('FITTING', 'BALL 1000# CWP BW 316SS TFE'), 'VALVES');
 });
 
+test('a support whose description names pipe is still a support', () => {
+  // Every one of these is real, from the client's newFmr36 package, and every
+  // one of them landed on the pipe buyer's sheet: the descriptions name the
+  // pipe the hardware holds. Same fault that once sent 344 rows of hardware
+  // to be quoted by the foot — the commodity code decides, not the words.
+  const supports = [
+    ['5SH-1', '5SH, SPACER FOR PIPE SIZE 20" AND SMALLER'],
+    ['5S2M3L-12', '5S2, WELDED SHOE LONG, SS, 3" HIGH, 12" PIPE'],
+    ['5DA2-M', '5DA2, DIRECTIONAL ANCHOR, SS, FOR PIPE SIZE 12" - 54" NPD'],
+    ['5ISC-06-02', '5ISC, INSULATED SUPPORT COLD SERV, 6" PIPE W/ 2" INSUL'],
+    ['5BG1-2', '5BG1, CLAMP ON GUIDE BERNECKER, SIZE CODE 2'],
+    ['5MG1S-1', '5MG1S, MODULAR GUIDE, STEEL SIZE CODE 1'],
+    ['5CH-02-15', '5CH, SUPPORT CRADLE HOT SERVICE 2" PIPE, 1-1/2" INS']
+  ];
+
+  for (const [code, description] of supports) {
+    assert.equal(takeoffSheetFor('SPECIALTY', description, code), 'SUPPORTS',
+      `${code} was quoted by the wrong supplier`);
+  }
+});
+
+test('actual pipe still reaches the pipe buyer', () => {
+  // The guard above must not swallow the material it sits next to.
+  assert.equal(
+    takeoffSheetFor('PIPE', 'PIPE SCH 40 ERW STL A53-B', '5356648'),
+    'PIPE & FITTINGS'
+  );
+  assert.equal(
+    takeoffSheetFor('FITTING', 'SOCKOLET 3000# STL A105', '5532671'),
+    'PIPE & FITTINGS'
+  );
+});
+
 test('COMBINED holds every row, and the category sheets sort them', () => {
   const grouped = groupBySheet([
     row({ itemType: 'PIPE', description: 'PIPE SCH 40 ERW STL A53-B' }),

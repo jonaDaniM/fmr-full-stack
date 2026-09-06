@@ -56,8 +56,16 @@ STANDALONE_GASKET_RE = re.compile(r"^\s*GASKETS?\b", re.IGNORECASE)
 
 # Turner's support commodity codes all start 5-something. A support is counted
 # hardware, never measured pipe, however much its description mentions pipe.
+# Support and attachment codes. All of these are counted hardware whose
+# description names the pipe they hold — "WELDED SHOE LONG, SS, 3" HIGH, 12"
+# PIPE" is a shoe, not twelve inches of pipe. Reading one as pipe is the same
+# fault that once sent 344 rows of hardware to be quoted by the foot, so the
+# code is the authority and the description is never consulted.
+#
+# Every entry below appears in the client's own newFmr36 package.
 SUPPORT_CODE_RE = re.compile(
-    r"^5(?:UGSP|UG|US|MUGSP|MUG|FSS\d*|FS\d*|MHR\d*|ABS\d*|MS|CC|CI|C|G\d*)",
+    r"^5(?:UGSP|UG|US|MUGSP|MUG|FSS\d*|FS\d*|MHR\d*|ABS\d*|MS|CH|CC|CI|C"
+    r"|SH|S\d|DA\d*|ISC|BG\d*|MG\d*|G\d*)",
     re.IGNORECASE,
 )
 
