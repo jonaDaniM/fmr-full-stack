@@ -107,3 +107,25 @@ export const skeleton = ({ stats = 0, rows = 6 } = {}) => `
  */
 export const emptyRow = (columns, message) =>
   `<tr class="empty-row"><td colspan="${columns}">${esc(message)}</td></tr>`;
+
+/**
+ * How a drawing is named on screen.
+ *
+ * The client corrected two things about this. A drawing is identified by its
+ * number alone — the trailing -02 or -03 is part of that number, not a sheet,
+ * and LP1Y-CHWR-033047-02 and -03 are two drawings of the same line. The old
+ * "sht 01" was a default nobody read off the page, so it said nothing true.
+ *
+ * What does matter is the revision. Engineers reissue a drawing as they change
+ * it, rev 0 being the original, and the yard always works to the latest — so a
+ * crew needs to see at a glance which revision a requisition was raised
+ * against. Shown only when the drawing carried one, because a typed FMR has no
+ * revision and "rev —" reads as missing data rather than as not applicable.
+ */
+export const isoLabel = (isoNumber, revision) =>
+  // Joined rather than concatenated so a line with no drawing number does not
+  // render as a stray " rev 2" with nothing in front of it. Compared against
+  // null rather than truthiness because rev 0 is a real revision — the
+  // original issue — and must not vanish.
+  [isoNumber, revision == null || revision === '' ? null : `rev ${revision}`]
+    .filter(Boolean).join(' ');

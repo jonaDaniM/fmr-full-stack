@@ -524,6 +524,7 @@ export function serializeLine(line) {
     lineNumber: line.line_number,
     isoNumber: line.iso_number,
     isoSheet: line.iso_sheet,
+    isoRevision: line.iso_revision,
     isoKey: line.iso_key,
     commodityCode: line.commodity_code,
     size: line.size,

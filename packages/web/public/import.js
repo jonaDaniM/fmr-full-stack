@@ -14,7 +14,7 @@
 import {
   api, upload as uploadWithProgress, idempotencyKey, getProjectId
 } from './lib/api.js';
-import { $, esc, editableNumber } from './lib/dom.js';
+import { $, esc, editableNumber, isoLabel } from './lib/dom.js';
 import { confirmAction } from './lib/modal.js';
 import { toast, toastError } from './lib/toast.js';
 import { initShell, session, refuseUnless } from './lib/shell.js';
@@ -867,7 +867,7 @@ function renderItem(item) {
              ${item.status === 'Blocked' ? 'disabled' : ''}
              aria-label="Include ${esc(item.fmrNumber ?? item.sheetName)}">
       <span class="name">${esc(item.fmrNumber ?? '(no FMR number)')}</span>
-      <span class="dim">${esc(item.isoNumber ?? '')} sht ${esc(item.isoSheet ?? '')}
+      <span class="dim">${esc(isoLabel(item.isoNumber, item.isoRevision))}
         &middot; ${item.lines.length} lines &middot; sheet "${esc(item.sheetName)}"</span>
       ${item.isDuplicate ? '<span class="pill pill-warn">Already exists</span>' : ''}
       ${item.status === 'Blocked' ? '<span class="pill pill-danger">Blocked</span>' : ''}

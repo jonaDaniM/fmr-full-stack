@@ -11,7 +11,7 @@
  */
 
 import { api, idempotencyKey } from './lib/api.js';
-import { $, esc, n, when, skeleton, emptyRow } from './lib/dom.js';
+import { $, esc, n, when, skeleton, emptyRow, isoLabel } from './lib/dom.js';
 import { dialog, confirmAction, askReason } from './lib/modal.js';
 import { toast, toastError } from './lib/toast.js';
 import { initShell, session, refuseUnless } from './lib/shell.js';
@@ -231,7 +231,7 @@ async function findLines() {
       <tbody>${results.map((l) => `<tr>
         <td class="mono">${esc(l.fmrNumber)}</td>
         <td class="num">${esc(l.lineNumber)}</td>
-        <td class="mono">${esc(l.isoNumber)} sht ${esc(l.isoSheet)}</td>
+        <td class="mono">${esc(isoLabel(l.isoNumber, l.isoRevision))}</td>
         <td>${esc(l.description ?? '')}</td>
         <td class="num">${n(l.quantities.issued)}</td>
         <td class="num">${n(l.quantities.remaining)}</td>
@@ -371,7 +371,7 @@ async function renderNotices() {
       <tbody>${notices.map((x) => `<tr>
         <td class="mono">${esc(x.fmrNumber)}</td>
         <td class="num">${esc(x.lineNumber)}</td>
-        <td>${esc(x.description ?? '')}<div class="dim">${esc(x.isoNumber)} sht ${esc(x.isoSheet)}</div></td>
+        <td>${esc(x.description ?? '')}<div class="dim">${esc(isoLabel(x.isoNumber, x.isoRevision))}</div></td>
         <td><span class="pill ${x.severity === 'critical' ? 'pill-danger'
                                 : x.severity === 'warning' ? 'pill-warn' : 'pill-quiet'}"
             >${esc(x.kind)}</span>

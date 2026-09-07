@@ -117,6 +117,7 @@ export async function findDonors(client, ctx, { lineId, limit = 25 }) {
       fmrNumber: d.fmr_number,
       lineNumber: d.line_number,
       isoNumber: d.iso_number,
+      isoRevision: d.iso_revision,
       description: d.material_description,
       commodityCode: d.commodity_code,
       size: d.size,

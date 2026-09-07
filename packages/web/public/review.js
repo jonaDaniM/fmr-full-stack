@@ -12,7 +12,7 @@
  */
 
 import { api, idempotencyKey } from './lib/api.js';
-import { $, esc, n } from './lib/dom.js';
+import { $, esc, n, isoLabel } from './lib/dom.js';
 import { askReason, confirmAction, dialog } from './lib/modal.js';
 import { toast, toastError } from './lib/toast.js';
 import { initShell, session } from './lib/shell.js';
@@ -73,7 +73,7 @@ function renderCard(item) {
       <div>
         <h3>${esc(item.fmrNumber || 'No number yet')}</h3>
         <p class="dim">
-          ${esc(item.isoNumber ?? '')}${item.isoSheet ? ` sht ${esc(item.isoSheet)}` : ''}
+          ${esc(isoLabel(item.isoNumber, item.isoRevision))}
           &middot; ${esc(item.lineCount)} line${item.lineCount === 1 ? '' : 's'}
           &middot; from ${esc(item.sourceName ?? 'a draft')}
           ${waited ? `&middot; waiting ${esc(waited)}` : ''}
@@ -214,7 +214,7 @@ $('view').addEventListener('click', async (event) => {
     if (action === 'PUBLISH') {
       const sure = await confirmAction({
         title: `Publish ${item.fmrNumber ?? 'this requisition'}?`,
-        lede: `${item.isoNumber ?? ''}${item.isoSheet ? ` sht ${item.isoSheet}` : ''}`,
+        lede: isoLabel(item.isoNumber, item.isoRevision),
         body: 'The crew can search for it and start pulling material '
           + 'immediately. Publishing cannot be undone.',
         confirmLabel: 'Publish'
@@ -250,7 +250,7 @@ $('view').addEventListener('click', async (event) => {
 async function number(item) {
   const answer = await dialog({
     title: 'Assign the FMR number',
-    lede: `${item.isoNumber ?? ''}${item.isoSheet ? ` sht ${item.isoSheet}` : ''}`,
+    lede: isoLabel(item.isoNumber, item.isoRevision),
     body: 'This is the number the field will search by, and the one purchasing '
       + 'quotes against. It must not already be in use.',
     fields: [{

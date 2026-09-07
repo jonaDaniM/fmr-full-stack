@@ -317,6 +317,7 @@ export async function getIsoSummary(client, projectId, {
   return {
     drawings: rows.map((row) => ({
       isoNumber: row.iso_number,
+      isoRevision: row.iso_revision,
       isoSheet: row.iso_sheet,
       lineCount: Number(row.line_count),
       fmrCount: Number(row.fmr_count),

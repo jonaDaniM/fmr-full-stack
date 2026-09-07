@@ -10,7 +10,7 @@
  */
 
 import { api, idempotencyKey } from './lib/api.js';
-import { $, esc, n, day, skeleton, editableNumber } from './lib/dom.js';
+import { $, esc, n, day, skeleton, editableNumber, isoLabel } from './lib/dom.js';
 import { dialog, confirmAction, askReason } from './lib/modal.js';
 import { toast, toastError } from './lib/toast.js';
 import { initShell, refuseUnless } from './lib/shell.js';
@@ -62,7 +62,7 @@ function renderDraft(draft) {
       ${draft.isDuplicate ? '<span class="pill pill-warn">Number already published</span>' : ''}
       ${blocked ? `<span class="pill pill-danger">${draft.errorCount} error${draft.errorCount === 1 ? '' : 's'}</span>` : ''}
       <div class="meta">
-        ${esc(draft.isoNumber ?? '')} ${draft.isoSheet ? `sht ${esc(draft.isoSheet)}` : ''}
+        ${esc(isoLabel(draft.isoNumber, draft.isoRevision))}
         &middot; ${esc(draft.lineCount)} line${draft.lineCount === 1 ? '' : 's'}
         ${draft.iwpNumber ? `&middot; IWP ${esc(draft.iwpNumber)}` : ''}
         ${draft.dateRequired ? `&middot; needed ${day(draft.dateRequired)}` : ''}

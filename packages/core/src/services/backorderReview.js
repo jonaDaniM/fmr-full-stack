@@ -258,6 +258,7 @@ function serializeBackorder(row) {
     lineNumber: row.line_number,
     splitFromId: row.split_from_id,
     isoNumber: row.iso_number,
+    isoRevision: row.iso_revision,
     isoSheet: row.iso_sheet,
     commodityCode: row.commodity_code,
     size: row.size,

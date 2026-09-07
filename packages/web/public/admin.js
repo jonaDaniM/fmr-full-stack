@@ -169,7 +169,7 @@ function renderQueueRow(r) {
   const note = extraNote(r);
   return `<tr data-request="${esc(r.id)}">
     <td class="num">${esc(r.lineNumber)}</td>
-    <td class="mono">${esc(r.isoNumber)}<span class="dim"> sht ${esc(r.isoSheet)}</span></td>
+    <td class="mono">${esc(r.isoNumber)}${r.isoRevision ? `<span class="dim"> rev ${esc(r.isoRevision)}</span>` : ''}</td>
     <td>${esc(r.description ?? '')}<div class="dim">${esc(r.commodityCode ?? '')} &middot; ${esc(r.size ?? '')}</div></td>
     <td class="num">${n(r.qtyRequested)}</td>
     <td class="num">${n(r.qtyPending)}</td>
@@ -526,7 +526,7 @@ function renderFmrLineRows(lines) {
     const bags = (l.activeBags ?? []).map((b) => b.tagNumber).join(', ');
     return `<tr>
       <td class="num">${esc(l.lineNumber)}</td>
-      <td class="mono">${esc(l.isoNumber)}<span class="dim"> sht ${esc(l.isoSheet)}</span></td>
+      <td class="mono">${esc(l.isoNumber)}${l.isoRevision ? `<span class="dim"> rev ${esc(l.isoRevision)}</span>` : ''}</td>
       <td>${esc(l.description ?? '')}
           <div class="dim">${esc(l.commodityCode ?? '')} &middot; ${esc(l.size ?? '')}</div>
           ${renderFieldNotes(l.fieldNotes)}</td>

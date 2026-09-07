@@ -95,6 +95,7 @@ export async function loadDraft(client, itemId) {
         fmrNumber: item.fmr_number,
         iwpNumber: item.iwp_number,
         isoNumber: item.iso_number,
+        isoRevision: item.iso_revision,
         isoSheet: item.iso_sheet,
         requestedBy: item.requested_by,
         dateRequired: item.date_required,

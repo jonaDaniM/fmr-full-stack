@@ -170,6 +170,7 @@ export async function outstandingNotices(client, projectId) {
     fmrNumber: row.fmr_number,
     lineNumber: row.line_number,
     isoNumber: row.iso_number,
+    isoRevision: row.iso_revision,
     isoSheet: row.iso_sheet,
     description: row.material_description,
     commodityCode: row.commodity_code,

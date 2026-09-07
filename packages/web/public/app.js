@@ -10,7 +10,7 @@
  */
 
 import { api, idempotencyKey } from './lib/api.js';
-import { $, esc, n, when } from './lib/dom.js';
+import { $, esc, n, when, isoLabel } from './lib/dom.js';
 import { dialog } from './lib/modal.js';
 import { toast, toastError, toastSticky } from './lib/toast.js';
 import { initShell, session } from './lib/shell.js';
@@ -145,7 +145,7 @@ function renderCard(line) {
     <div class="card-head">
       <div class="card-top">
         <span class="ln">Line ${esc(line.lineNumber)}</span>
-        <span class="iso">${esc(line.isoNumber)} sht ${esc(line.isoSheet)}</span>
+        <span class="iso">${esc(isoLabel(line.isoNumber, line.isoRevision))}</span>
         <span class="${statusPill(line.status)}">${esc(line.status)}</span>
       </div>
       <div class="desc">${esc(line.description ?? '')}</div>
@@ -201,6 +201,7 @@ function groupByFmr(lines) {
         fmrNumber: line.fmrNumber,
         isoNumber: line.isoNumber,
         isoSheet: line.isoSheet,
+        isoRevision: line.isoRevision,
         priority: line.priority,
         dateRequired: line.dateRequired,
         lines: []
@@ -212,7 +213,7 @@ function groupByFmr(lines) {
   // One drawing across the whole FMR is worth naming in the header; several
   // means the header cannot speak for them, so the line rows carry it.
   for (const group of groups.values()) {
-    const drawings = new Set(group.lines.map((l) => `${l.isoNumber} sht ${l.isoSheet}`));
+    const drawings = new Set(group.lines.map((l) => isoLabel(l.isoNumber, l.isoRevision)));
     group.drawing = drawings.size === 1 ? [...drawings][0] : `${drawings.size} drawings`;
     group.totals = group.lines.reduce(
       (acc, l) => ({

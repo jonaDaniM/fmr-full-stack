@@ -92,14 +92,19 @@ export async function stageWorkbook(ctx, { sheets, sourceName, profile, profileN
       const { rows: itemRows } = await client.query(
         `INSERT INTO import_items
            (batch_id, project_id, sheet_name, fmr_number, iwp_number, iso_number,
-            iso_sheet, requested_by, date_required, priority, header_json,
-            line_count, status, selected, existing_fmr_id)
-         VALUES ($1,$15,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+            iso_sheet, iso_revision, requested_by, date_required, priority,
+            header_json, line_count, status, selected, existing_fmr_id)
+         VALUES ($1,$16,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
          RETURNING id`,
         [
           batchId, sheet.sheetName, fmrNumber,
           sheet.header.iwpNumber ?? null, sheet.header.isoNumber ?? null,
-          sheet.header.isoSheet ?? null, sheet.header.requestedBy ?? null,
+          sheet.header.isoSheet ?? null,
+          // The revision a crew works to. Read off the title block by the
+          // drawing extractor, and until now kept only inside header_json
+          // where nothing could query or display it.
+          sheet.header.revision ?? null,
+          sheet.header.requestedBy ?? null,
           parseDate(sheet.header.dateRequired), sheet.header.priority ?? null,
           sheet.header, sheet.lines.length,
           hasErrors || waitingAlready ? 'Blocked'
@@ -216,6 +221,7 @@ export async function getBatch(client, projectId, batchId) {
       fmrNumber: item.fmr_number,
       iwpNumber: item.iwp_number,
       isoNumber: item.iso_number,
+      isoRevision: item.iso_revision,
       isoSheet: item.iso_sheet,
       requestedBy: item.requested_by,
       dateRequired: item.date_required,
@@ -467,11 +473,12 @@ export async function publishBatch(ctx, { batchId, itemIds }) {
         await client.query(
           `INSERT INTO fmr_lines
              (project_id, fmr_id, line_number, iso_number, iso_sheet,
-              commodity_code, size, material_description, qty_requested, uom,
-              storage_location, created_by, updated_by)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$12)`,
+              iso_revision, commodity_code, size, material_description,
+              qty_requested, uom, storage_location, created_by, updated_by)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$13)`,
           [
             projectId, fmrId, line.line_number, item.iso_number, item.iso_sheet,
+            item.iso_revision,
             line.commodity_code, line.size, line.description, line.quantity,
             line.uom, line.storage_location, user.id
           ]

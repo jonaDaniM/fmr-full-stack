@@ -273,6 +273,7 @@ export async function reviewQueue(client, ctx, { state = null } = {}) {
       batchId: row.batch_id,
       fmrNumber: row.fmr_number,
       isoNumber: row.iso_number,
+      isoRevision: row.iso_revision,
       isoSheet: row.iso_sheet,
       lineCount: row.line_count,
       lines: linesByItem[row.id] ?? [],
