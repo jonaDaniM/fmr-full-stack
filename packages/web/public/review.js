@@ -71,7 +71,10 @@ function renderCard(item) {
   return `<section class="review-card" data-item="${esc(item.id)}">
     <div class="review-head">
       <div>
-        <h3>${esc(item.fmrNumber || 'No number yet')}</h3>
+        <!-- A planner reviews the work, which the drawing names; the FMR
+             number arrives at the material manager's step after this one. -->
+        <h3>${esc(item.fmrNumber
+          || isoLabel(item.isoNumber, item.isoRevision) || 'No number yet')}</h3>
         <p class="dim">
           ${esc(isoLabel(item.isoNumber, item.isoRevision))}
           &middot; ${esc(item.lineCount)} line${item.lineCount === 1 ? '' : 's'}

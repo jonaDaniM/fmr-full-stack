@@ -102,16 +102,25 @@ test('a missing quantity blocks publishing; a missing code does not', () => {
   assert.equal(summary.linesToCheck, 2, 'both lines want a person to look');
 });
 
-test('a drawing proposes an FMR number, and says that it did', () => {
-  // A drawing carries no FMR number. One is proposed from the drawing so the
-  // reviewer has something to accept or change, and flagged so it is never
-  // published as though the office had chosen it.
+test('a drawing does not invent an FMR number, and says one is owed', () => {
+  // The drawing number is not an FMR number. An FMR number counts from 1
+  // upward and the office issues it; a drawing number names a piece of work.
+  // Proposing one as the other numbered every imported FMR after its drawing.
   const { sheets } = toDraftSheets(payload([row()]));
-  assert.equal(sheets[0].header.fmrNumber, 'LP1Y-CHWR-033047-02');
+  assert.equal(sheets[0].header.fmrNumber, null, 'the office issues it, not the import');
+  assert.equal(sheets[0].header.isoNumber, 'LP1Y-CHWR-033047-02', 'the drawing is kept');
   assert.equal(sheets[0].header.iwpNumber, 'IWP-88-014', 'the package names it');
 
-  const flag = sheets[0].issues.find((i) => i.code === 'PROPOSED_FMR_NUMBER');
-  assert.equal(flag.severity, 'warning', 'a proposal does not block publishing');
+  const flag = sheets[0].issues.find((i) => i.code === 'NEEDS_FMR_NUMBER');
+  assert.equal(flag.severity, 'warning',
+    'a missing number does not block review — publishing is what requires it');
+});
+
+test('the drawing revision is kept, because crews work to the latest', () => {
+  // Rev 0 is the original issue, so this is checked against a falsy value on
+  // purpose: a truthiness test here would drop precisely that revision.
+  const { sheets } = toDraftSheets(payload([row()], { revision: '0' }));
+  assert.equal(sheets[0].header.revision, '0');
 });
 
 test('a whole-drawing note is not counted as a line to check', () => {

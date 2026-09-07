@@ -57,7 +57,9 @@ function renderDraft(draft) {
   return `<div class="draft ${draft.archived ? 'archived' : ''} ${blocked ? 'blocked' : ''}"
              data-batch="${esc(draft.batchId)}" data-item="${esc(draft.itemId)}">
     <div class="who">
-      <span class="num">${esc(draft.fmrNumber || '(no number yet)')}</span>
+      <!-- Until the office issues a number the drawing is what names it. -->
+      <span class="num">${esc(draft.fmrNumber
+        || isoLabel(draft.isoNumber, draft.isoRevision) || '(no number yet)')}</span>
       ${draft.source === 'import' ? '<span class="pill pill-quiet">Imported</span>' : ''}
       ${draft.isDuplicate ? '<span class="pill pill-warn">Number already published</span>' : ''}
       ${blocked ? `<span class="pill pill-danger">${draft.errorCount} error${draft.errorCount === 1 ? '' : 's'}</span>` : ''}

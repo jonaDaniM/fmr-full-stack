@@ -866,9 +866,13 @@ function renderItem(item) {
              ${item.selected ? 'checked' : ''}
              ${item.status === 'Blocked' ? 'disabled' : ''}
              aria-label="Include ${esc(item.fmrNumber ?? item.sheetName)}">
-      <span class="name">${esc(item.fmrNumber ?? '(no FMR number)')}</span>
-      <span class="dim">${esc(isoLabel(item.isoNumber, item.isoRevision))}
-        &middot; ${item.lines.length} lines &middot; sheet "${esc(item.sheetName)}"</span>
+      <!-- The drawing names it until the office issues a number. Heading a
+           card "(no FMR number)" would be true and useless: at this point in
+           the workflow the ISO is what a reviewer recognises it by. -->
+      <span class="name">${esc(item.fmrNumber ?? isoLabel(item.isoNumber, item.isoRevision))}</span>
+      <span class="dim">${item.fmrNumber
+        ? `${esc(isoLabel(item.isoNumber, item.isoRevision))} &middot; ` : ''
+        }${item.lines.length} lines${item.fmrNumber ? '' : ' &middot; no FMR number yet'}</span>
       ${item.isDuplicate ? '<span class="pill pill-warn">Already exists</span>' : ''}
       ${item.status === 'Blocked' ? '<span class="pill pill-danger">Blocked</span>' : ''}
       <button type="button" class="btn btn-quiet btn-sm drop-item"

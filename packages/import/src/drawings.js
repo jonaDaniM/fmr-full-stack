@@ -152,16 +152,20 @@ function toSheet(drawing, iwpNumber) {
     });
   }
 
-  // A drawing does not carry an FMR number — the office issues those. One is
-  // proposed from the drawing so the reviewer has something to accept or edit
-  // rather than an empty box, and it is flagged either way: publishing under a
-  // number nobody chose is how two FMRs end up meaning the same thing.
-  const fmrNumber = isoNumber;
+  // A drawing carries no FMR number, and the drawing number is not one: an FMR
+  // number counts from 1 upward and the office issues it, where a drawing
+  // number identifies a piece of work. Proposing the one as the other numbered
+  // every imported FMR after its drawing, which is what the client saw.
+  //
+  // So it is left empty here and issued at the point in the workflow that
+  // exists for it. Saving is lenient and publishing is strict — an FMR cannot
+  // reach a crew without a number, and `requireFmrNumber` is what enforces
+  // that, so nothing escapes unnumbered by leaving it out now.
   issues.push({
     severity: SEVERITY.WARNING,
-    code: 'PROPOSED_FMR_NUMBER',
-    message: `This FMR is proposed as ${fmrNumber}, after the drawing. `
-      + 'Change it if the office numbers these differently.',
+    code: 'NEEDS_FMR_NUMBER',
+    message: `${isoNumber} has no FMR number yet. `
+      + 'One is given when the material manager releases it.',
     row: null,
     sourceRow: null
   });
@@ -169,12 +173,13 @@ function toSheet(drawing, iwpNumber) {
   return {
     sheetName: isoNumber,
     header: {
-      fmrNumber,
+      fmrNumber: null,
       iwpNumber: iwpNumber || null,
       isoNumber,
-      // Each PDF here is one sheet of its own drawing, so unless the number
-      // says otherwise this is sheet 01 — the same default the workbook
-      // importer applies.
+      // Kept because the schema requires it, but not read off the page: no
+      // drawing in the sample set carries a sheet in the sense this implies —
+      // the title block's own SHEET field says "1 OF 1", and the trailing -02
+      // or -03 belongs to the drawing number. Nothing displays it any more.
       isoSheet: normalizeSheet(drawing.sheet) ?? '01',
       revision: clean(drawing.revision) || null,
       sourceFile: clean(drawing.sourcePdf) || null,
