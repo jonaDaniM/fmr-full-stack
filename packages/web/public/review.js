@@ -254,24 +254,33 @@ async function number(item) {
   const answer = await dialog({
     title: 'Assign the FMR number',
     lede: isoLabel(item.isoNumber, item.isoRevision),
-    body: 'This is the number the field will search by, and the one purchasing '
-      + 'quotes against. It must not already be in use.',
+    body: 'The next number is issued automatically — leave this empty to take '
+      + 'it. Type one only to depart from the sequence; it must not already be '
+      + 'in use. This is the number the field searches by and the one '
+      + 'purchasing quotes against.',
     fields: [{
+      // Not required: empty is the ordinary case now, and means "issue the
+      // next one". The placeholder says so rather than showing a specimen
+      // number, which would read as a format to copy.
       name: 'fmrNumber', label: 'FMR number', value: item.fmrNumber ?? '',
-      placeholder: 'FMR-2026-0417', required: true
+      placeholder: 'next in sequence', required: false
     }],
     confirmLabel: 'Assign and release',
     onSubmit: async ({ fmrNumber }) => {
-      await api('/api/review/number', {
+      // The server answers with the number it issued, which is the only place
+      // it exists when the sequence chose it.
+      const { fmrNumber: issued } = await api('/api/review/number', {
         method: 'POST',
         body: JSON.stringify({ itemId: item.id, fmrNumber })
       });
-      return true;
+      return issued ?? true;
     }
   });
 
-  if (answer !== true) return;
-  toast('Numbered. It can be published now.');
+  if (!answer) return;
+  toast(typeof answer === 'string'
+    ? `Numbered FMR ${answer}. It can be published now.`
+    : 'Numbered. It can be published now.');
   await load();
 }
 

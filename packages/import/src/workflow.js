@@ -134,15 +134,57 @@ export async function advance(ctx, { itemId, action, reason = null }) {
  * not to whoever happens to be editing the draft. Assigning it is its own
  * step for that reason.
  */
-export async function assignNumber(ctx, { itemId, fmrNumber }) {
-  const number = String(fmrNumber ?? '').trim().toUpperCase();
-  if (!number) {
-    throw new LedgerError('An FMR number is required to release this.', 'NO_NUMBER');
+/**
+ * The next FMR number for a project.
+ *
+ * The client's numbers count from 1 upward — 406, 407, 408 — and were typed by
+ * hand in the spreadsheet this replaces, which is exactly the job a database
+ * should be doing. The counter was seeded past the highest number that
+ * migrated in, so an issued number cannot collide with the history.
+ *
+ * The UPDATE ... RETURNING takes a row lock, so two people releasing at the
+ * same moment queue rather than both reading the same value. Skipping a number
+ * when a transaction rolls back is deliberate: a gap is a smaller problem than
+ * two FMRs claiming one number, and the unique index would refuse the second
+ * anyway.
+ */
+async function nextFmrNumber(client, projectId) {
+  const { rows } = await client.query(
+    `UPDATE fmr_number_sequences
+        SET next_value = next_value + 1, updated_at = now()
+      WHERE project_id = $1
+      RETURNING next_value - 1 AS issued`,
+    [projectId]
+  );
+
+  // A project created before this existed, or one seeded outside the
+  // migration. Start it above whatever numbers it already holds rather than
+  // at 1, which would collide on the first release.
+  if (!rows[0]) {
+    await client.query(
+      `INSERT INTO fmr_number_sequences (project_id, next_value)
+       SELECT $1, coalesce(max(fmr_number::bigint), 0) + 1
+         FROM fmr_headers
+        WHERE project_id = $1 AND fmr_number ~ '^[0-9]+$'
+       ON CONFLICT (project_id) DO NOTHING`,
+      [projectId]
+    );
+    return nextFmrNumber(client, projectId);
   }
+
+  return String(rows[0].issued);
+}
+
+export async function assignNumber(ctx, { itemId, fmrNumber }) {
+  // Empty means "you decide", which is what the client asked for: the number
+  // is the database's to issue. A number typed in still wins, because renumber
+  // and correct-before-release are both real needs.
+  const asked = String(fmrNumber ?? '').trim().toUpperCase();
 
   return withTransaction(async (client) => {
     const item = await lockItem(client, itemId, ctx.projectId);
     const permissions = permissionsOf(ctx);
+    const number = asked || await nextFmrNumber(client, ctx.projectId);
 
     let next;
     try {
