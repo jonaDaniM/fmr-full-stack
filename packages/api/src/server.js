@@ -93,7 +93,11 @@ const SECURITY_HEADERS = {
     "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.jsdelivr.net",
     'font-src https://fonts.gstatic.com',
     "img-src 'self' data:",
-    "connect-src 'self'",
+    // A package too big for Cloud Run's 32MB body limit is PUT straight to
+    // Cloud Storage, so that one bucket has to be reachable from the page.
+    // Named exactly rather than allowing storage.googleapis.com, which would
+    // admit every bucket in the world as an exfiltration target.
+    `connect-src 'self'${uploadBucket() ? ` https://storage.googleapis.com/${uploadBucket()}/` : ''}`,
     'frame-src https://accounts.google.com',
     // The office screens confirm and reject backorders on a single click, so
     // they must not be framable.
