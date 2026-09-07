@@ -64,8 +64,11 @@ function renderDraft(draft) {
       ${draft.isDuplicate ? '<span class="pill pill-warn">Number already published</span>' : ''}
       ${blocked ? `<span class="pill pill-danger">${draft.errorCount} error${draft.errorCount === 1 ? '' : 's'}</span>` : ''}
       <div class="meta">
-        ${esc(isoLabel(draft.isoNumber, draft.isoRevision))}
-        &middot; ${esc(draft.lineCount)} line${draft.lineCount === 1 ? '' : 's'}
+        <!-- Only when the heading is not already the drawing. An unnumbered
+             card is headed by its ISO, and printing it twice reads as a bug. -->
+        ${draft.fmrNumber
+          ? `${esc(isoLabel(draft.isoNumber, draft.isoRevision))} &middot; ` : ''}
+        ${esc(draft.lineCount)} line${draft.lineCount === 1 ? '' : 's'}
         ${draft.iwpNumber ? `&middot; IWP ${esc(draft.iwpNumber)}` : ''}
         ${draft.dateRequired ? `&middot; needed ${day(draft.dateRequired)}` : ''}
         &middot; ${esc(draft.createdBy ?? '')} ${day(draft.createdAt)}

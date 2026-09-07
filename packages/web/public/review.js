@@ -76,8 +76,9 @@ function renderCard(item) {
         <h3>${esc(item.fmrNumber
           || isoLabel(item.isoNumber, item.isoRevision) || 'No number yet')}</h3>
         <p class="dim">
-          ${esc(isoLabel(item.isoNumber, item.isoRevision))}
-          &middot; ${esc(item.lineCount)} line${item.lineCount === 1 ? '' : 's'}
+          ${item.fmrNumber
+            ? `${esc(isoLabel(item.isoNumber, item.isoRevision))} &middot; ` : ''}
+          ${esc(item.lineCount)} line${item.lineCount === 1 ? '' : 's'}
           &middot; from ${esc(item.sourceName ?? 'a draft')}
           ${waited ? `&middot; waiting ${esc(waited)}` : ''}
         </p>
