@@ -61,7 +61,8 @@ import {
   startJob, runJob, getJob, failAbandonedJobs
 } from '../../import/src/extractionJobs.js';
 import {
-  bucket as uploadBucket, objectNameFor, uploadUrl, assertOwnedBy
+  bucket as uploadBucket, objectNameFor, uploadUrl, assertOwnedBy,
+  download as downloadUpload, discard as discardUpload
 } from '../../import/src/objectStore.js';
 import {
   authenticate, require as requirePermission, requireAny, verifyGoogleToken,
@@ -901,19 +902,39 @@ route('POST', /^\/api\/import\/takeoff$/, async (req, res, { url }) => {
   const ctx = await authenticate(req);
   requirePermission(ctx, 'ownerEdit');
 
-  const chunks = [];
-  let size = 0;
-  for await (const chunk of req) {
-    size += chunk.length;
-    if (size > 100_000_000) {
-      throw new LedgerError('That package is too large.', 'TOO_LARGE');
-    }
-    chunks.push(chunk);
-  }
-  if (!size) throw new LedgerError('No drawings were uploaded.', 'NO_FILE');
+  // Same two shapes as the FMR import: bytes for a package that fits in one
+  // request, object names for one that does not. Unlike that path this answer
+  // is the file itself, so the objects are fetched here rather than by a job.
+  let files;
+  let objects = null;
 
-  const files = unframeFiles(Buffer.concat(chunks));
-  if (!files.length) throw new LedgerError('No drawings were uploaded.', 'NO_FILE');
+  if (/^application\/json/.test(req.headers['content-type'] ?? '')) {
+    const body = await readBody(req);
+    objects = Array.isArray(body.objects) ? body.objects : [];
+    if (!objects.length) throw new LedgerError('No drawings were uploaded.', 'NO_FILE');
+    for (const objectName of objects) assertOwnedBy(objectName, ctx.projectId);
+    files = await Promise.all(objects.map(downloadUpload));
+  } else {
+    const chunks = [];
+    let size = 0;
+    for await (const chunk of req) {
+      size += chunk.length;
+      // Cloud Run's front end refuses anything larger before it reaches this
+      // container, so a bigger figure here would be a promise it cannot keep.
+      if (size > 30_000_000) {
+        throw new LedgerError(
+          'That package is too large to send directly. Reload the page and try '
+          + 'again — it will upload in a way that has no size limit.',
+          'TOO_LARGE'
+        );
+      }
+      chunks.push(chunk);
+    }
+    if (!size) throw new LedgerError('No drawings were uploaded.', 'NO_FILE');
+
+    files = unframeFiles(Buffer.concat(chunks));
+    if (!files.length) throw new LedgerError('No drawings were uploaded.', 'NO_FILE');
+  }
 
   const takeoff = await extractDrawings(files, {
     iwpNumber: (url.searchParams.get('iwp') ?? '').trim() || undefined,
@@ -936,6 +957,11 @@ route('POST', /^\/api\/import\/takeoff$/, async (req, res, { url }) => {
     'x-takeoff-drawings': String(takeoff.drawings)
   });
   res.end(document);
+
+  // The takeoff is written; the drawings it was read from have no further use.
+  // After the response, because the caller is waiting on a file and a delete
+  // is not their business. `discardUpload` never throws.
+  if (objects) await Promise.all(objects.map(discardUpload));
 });
 
 // --- the approval chain ----------------------------------------------------

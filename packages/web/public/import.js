@@ -508,6 +508,27 @@ async function sendDirectly(files) {
  * sooner while making the progress bar meaningless.
  */
 async function sendViaStorage(files) {
+  const objects = await uploadToStorage(files);
+
+  $('uploadWhat').textContent = 'Reading the drawings…';
+
+  return api('/api/import/drawings', {
+    method: 'POST',
+    body: JSON.stringify({ objects })
+  });
+}
+
+/**
+ * Put every file in the bucket and return what to call them.
+ *
+ * Shared by the FMR import and the takeoff, which differ only in what they ask
+ * the server to do with the names afterwards.
+ *
+ * One file at a time rather than all at once: a package this size is being
+ * sent over site wifi, and several large uploads competing for it finish no
+ * sooner while making the progress bar meaningless.
+ */
+async function uploadToStorage(files) {
   let uploads;
   try {
     ({ uploads } = await api('/api/import/uploads', {
@@ -545,12 +566,7 @@ async function sendViaStorage(files) {
     sent.push(upload.objectName);
   }
 
-  $('uploadWhat').textContent = 'Reading the drawings…';
-
-  return api('/api/import/drawings', {
-    method: 'POST',
-    body: JSON.stringify({ objects: sent })
-  });
+  return sent;
 }
 
 /**
@@ -604,19 +620,31 @@ async function sendTakeoff(files) {
     'Reading the drawings for a takeoff…'
   );
 
-  const loaded = await Promise.all(
-    pdfs.map(async (file) => ({ name: file.name, buffer: await file.arrayBuffer() }))
-  );
-
   const query = new URLSearchParams();
   if (cwa) query.set('cwa', cwa);
   if (iwp) query.set('iwp', iwp);
 
   try {
+    // A package over the front end's limit goes to Cloud Storage first and is
+    // named rather than sent, exactly as the FMR import does.
+    const total = pdfs.reduce((sum, file) => sum + file.size, 0);
+    const request = total > DIRECT_UPLOAD_LIMIT
+      ? {
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ objects: await uploadToStorage(pdfs) })
+        }
+      : {
+          body: frameFiles(await Promise.all(
+            pdfs.map(async (file) => ({ name: file.name, buffer: await file.arrayBuffer() }))
+          ))
+        };
+
+    $('uploadWhat').textContent = 'Reading the drawings for a takeoff…';
+
     const response = await fetch(`/api/import/takeoff?${query}`, {
       method: 'POST',
-      headers: { 'x-project-id': getProjectId() },
-      body: frameFiles(loaded)
+      headers: { 'x-project-id': getProjectId(), ...(request.headers ?? {}) },
+      body: request.body
     });
 
     if (!response.ok) {
