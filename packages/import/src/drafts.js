@@ -493,7 +493,8 @@ export async function listDrafts(client, projectId, { source, includeArchived = 
             coalesce(q.warnings, b.warning_count) AS warning_count,
             u.display_name AS created_by_name,
             i.id AS item_id, i.fmr_number, i.iwp_number, i.iso_number,
-            i.iso_sheet, i.requested_by, i.date_required, i.priority,
+            i.iso_sheet, i.iso_revision, i.requested_by, i.date_required,
+            i.priority,
             i.status, i.existing_fmr_id
        FROM import_batches b
        LEFT JOIN import_items i ON i.batch_id = b.id
@@ -523,6 +524,7 @@ export async function listDrafts(client, projectId, { source, includeArchived = 
     iwpNumber: row.iwp_number,
     isoNumber: row.iso_number,
     isoSheet: row.iso_sheet,
+    isoRevision: row.iso_revision,
     requestedBy: row.requested_by,
     dateRequired: row.date_required,
     priority: row.priority,

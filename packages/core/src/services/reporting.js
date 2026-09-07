@@ -297,7 +297,7 @@ export async function getIsoSummary(client, projectId, {
   const offset = (current - 1) * size;
 
   const { rows } = await client.query(
-    `SELECT l.iso_number, l.iso_sheet,
+    `SELECT l.iso_number, l.iso_sheet, l.iso_revision,
             count(*)                                  AS line_count,
             count(DISTINCT l.fmr_id)                  AS fmr_count,
             coalesce(sum(l.qty_requested), 0)         AS qty_requested,
@@ -308,7 +308,7 @@ export async function getIsoSummary(client, projectId, {
                        + l.qty_confirmed_backorder), 0) AS qty_backordered
        FROM fmr_lines l
       WHERE l.project_id = $1 AND l.active${match}
-      GROUP BY l.iso_number, l.iso_sheet
+      GROUP BY l.iso_number, l.iso_sheet, l.iso_revision
       ORDER BY l.iso_number, l.iso_sheet
       LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
     [...params, size, offset]

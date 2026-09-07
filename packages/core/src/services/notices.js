@@ -155,7 +155,8 @@ export async function noticesForLines(client, projectId, lineIds) {
 /** Everything currently outstanding on a project, for the office to chase. */
 export async function outstandingNotices(client, projectId) {
   const { rows } = await client.query(
-    `SELECT n.*, l.iso_number, l.iso_sheet, l.line_number, l.material_description,
+    `SELECT n.*, l.iso_number, l.iso_sheet, l.iso_revision, l.line_number,
+            l.material_description,
             l.commodity_code, l.size, h.fmr_number
        FROM field_notices n
        JOIN fmr_lines l   ON l.id = n.fmr_line_id

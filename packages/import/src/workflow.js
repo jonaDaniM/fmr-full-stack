@@ -265,7 +265,8 @@ export async function reviewQueue(client, ctx, { state = null } = {}) {
   if (!wanted.length) return { items: [], states: mine };
 
   const { rows } = await client.query(
-    `SELECT i.id, i.fmr_number, i.iso_number, i.iso_sheet, i.line_count,
+    `SELECT i.id, i.fmr_number, i.iso_number, i.iso_sheet, i.iso_revision,
+            i.line_count,
             i.workflow_state, i.planner_note, i.planner_decided_at,
             i.numbered_at, i.batch_id,
             b.source_name, b.created_at,
